@@ -6,14 +6,15 @@ The CLI entrypoint is `oqtopus`, with subcommands such as `oqtopus init` and
 
 ## Documents
 
-- `docs/oqtopus-cli.md`: product-level CLI specification.
-- `docs/implementation/copilot-implementation-brief.md`: implementation handoff for the shell PoC and later Rust rewrite.
-- `docs/install-sh.md`: installer behavior for `scripts/install.sh`.
-- `docs/spec-status.md`: decided items, open questions, and deferred topics.
+- `spec/oqtopus-cli.md`: product-level CLI specification.
+- `spec/implementation/copilot-implementation-brief.md`: implementation handoff for the shell PoC and later Rust rewrite.
+- `spec/install-sh.md`: installer behavior for `scripts/install.sh`.
+- `spec/spec-status.md`: decided items, open questions, and deferred topics.
 
 ## Repository Layout
 
-- `docs/`: specifications and implementation planning documents
+- `spec/`: specifications and implementation planning documents
+- `docs/`: documents for users
 - `templates/`: environment templates used by `oqtopus init`
 - `scripts/`: helper scripts such as `install.sh`
 - `bin/oqtopus`: current shell-based CLI entrypoint
