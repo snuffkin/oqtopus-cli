@@ -63,6 +63,10 @@ The installer should query:
 https://api.github.com/repos/oqtopus-team/oqtopus-cli/tags?per_page=100
 ```
 
+For now, inspecting up to 100 tags is considered sufficient.
+If the API response contains 100 tags, `install.sh` SHOULD print a warning that
+additional tags may exist and the latest version resolution may be incomplete.
+
 Version comparison MUST follow semantic version ordering, not plain string
 comparison.
 

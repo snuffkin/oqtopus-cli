@@ -31,11 +31,17 @@ Current support target:
   .metadata       # environment-specific metadata
   .env            # environment variables
   config/         # configuration files for each microservice
-  logs/           # log files for each microservice
-  pids/           # process ID files for each microservice
+  logs/           # per-service log directories
+  pids/           # PID files such as core.pid
 ```
 
 No backend code is installed at init time.
+
+The `logs/` directory contains one subdirectory for each managed service, such
+as `logs/core/`, `logs/sse_engine/`, and `logs/tranqu/`.
+
+The `pids/` directory stores PID files using the `<component>.pid` naming
+convention, such as `core.pid`, `sse_engine.pid`, and `tranqu.pid`.
 
 ## 3. .metadata Specification
 
@@ -92,6 +98,33 @@ The `templates/backend/` directory is treated as the source template root.
 Its files are copied into `<env_name>/`, except for `.metadata`, which is
 always generated dynamically by `oqtopus init`.
 
+The expected configuration tree under `templates/backend/config/` is:
+
+```text
+templates/backend/config/
+  core/
+    config.yaml
+    logging.yaml
+  sse_engine/
+    config.yaml
+    logging.yaml
+  mitigator/
+    config.yaml
+    logging.yaml
+  estimator/
+    config.yaml
+    logging.yaml
+  combiner/
+    config.yaml
+    logging.yaml
+  tranqu/
+    config.yaml
+    logging.yaml
+  gateway/
+    config.yaml
+    logging.yaml
+```
+
 ## 5. `oqtopus backend` Specification
 
 ### 5.1 Mandatory pre-execution checks
@@ -126,6 +159,7 @@ This directory is not an OQTOPUS backend environment.
 Template mismatch:
 
 ```text
+Error: invalid environment template.
 Found template='cloud', but 'oqtopus backend' requires template='backend'.
 ```
 
@@ -142,6 +176,34 @@ Executed outside a backend environment:
 ```text
 Error: oqtopus backend must be run inside a directory created by
 oqtopus init <env_name> --template backend.
+```
+
+Install failure example:
+
+```text
+Error: failed to install component 'tranqu'.
+Could not resolve a latest stable version from GitHub tags.
+```
+
+Uninstall failure example:
+
+```text
+Error: cannot uninstall 'engine' version 'v1.2.0'.
+The version is still referenced by another environment.
+```
+
+Start failure example:
+
+```text
+Error: cannot start 'core'.
+The component appears to be already running (PID 12345).
+```
+
+Stop failure example:
+
+```text
+Error: failed to stop 'gateway'.
+The process did not exit within 5 seconds after TERM was sent.
 ```
 
 ## 6. Installation Layout (XDG Data Directory)
@@ -201,6 +263,8 @@ Execution Flow:
    - Uses the provided `version` (e.g., `v2.0.0`).
    - If omitted, queries the public GitHub tags API for the respective repository and selects the newest stable semantic version tag in `vX.Y.Z` format.
    - The tags API request SHOULD use `?per_page=100`.
+   - If the tags API response contains 100 tags, the CLI SHOULD print a warning
+     that additional tags may exist and latest version resolution may be incomplete.
    - Pre-release tags are excluded from automatic latest selection.
 
 2. Directory Preparation:
@@ -270,6 +334,16 @@ oqtopus backend prune
 - `oqtopus backend prune --yes` skips the confirmation prompt.
 - Retains versions referenced by any `.metadata`.
 
+Suggested interactive prompt:
+
+```text
+The following installed releases will be deleted:
+  - /home/user/.local/share/oqtopus/backend/releases/engine-v1.2.0
+  - /home/user/.local/share/oqtopus/backend/releases/tranqu-v0.4.1
+
+Proceed? [y/N]:
+```
+
 ### 8.5 start
 
 Starts backend processes.
@@ -293,17 +367,66 @@ Expected behavior:
    - These variables MUST NOT be persisted as global or user-shell environment variables.
 4. Launching the Backend Component
    - All managed backend processes are launched via `uv`.
-   - The exact launch command is currently fixed only for `tranqu`.
-   - Start invocations for other managed services are to be defined separately.
+   - `core`, `sse_engine`, `mitigator`, `estimator`, and `combiner` are independent managed services launched from the installed `engine` release.
+   - `tranqu` is launched from the installed `tranqu` release.
+   - `gateway` is launched from the installed `gateway` release.
+   - For `core`:
+
+      ```bash
+      uv run --project <install_root>/engine-<version> python -m oqtopus_engine_core.app \
+          -c <env_root>/config/core/config.yaml \
+          -l <env_root>/config/core/logging.yaml
+      ```
+
+   - For `sse_engine`:
+
+      ```bash
+      uv run --project <install_root>/engine-<version> python -m oqtopus_engine_core.app \
+          -c <env_root>/config/sse_engine/config.yaml \
+          -l <env_root>/config/sse_engine/logging.yaml
+      ```
+
+   - For `mitigator`:
+
+      ```bash
+      uv run --project <install_root>/engine-<version> python -m oqtopus_engine_mitigator.app \
+          -c <env_root>/config/mitigator/config.yaml \
+          -l <env_root>/config/mitigator/logging.yaml
+      ```
+
+   - For `estimator`:
+
+      ```bash
+      uv run --project <install_root>/engine-<version> python -m oqtopus_engine_estimator.app \
+          -c <env_root>/config/estimator/config.yaml \
+          -l <env_root>/config/estimator/logging.yaml
+      ```
+
+   - For `combiner`:
+
+      ```bash
+      uv run --project <install_root>/engine-<version> python -m oqtopus_engine_combiner.app \
+          -c <env_root>/config/combiner/config.yaml \
+          -l <env_root>/config/combiner/logging.yaml
+      ```
+
    - For `tranqu`:
      - The installed version MUST be read from `.metadata`: `tranqu_version=vX.Y.Z`
      - The CLI MUST launch the installed release using:
 
-```bash
-uv run --project <install_root>/<component>-<version> python -m tranqu_server.proto.service \
-    -c <env_root>/config/tranqu/config.yaml \
-    -l <env_root>/config/tranqu/logging.yaml
-```
+      ```bash
+      uv run --project <install_root>/tranqu-<version> python -m tranqu_server.proto.service \
+          -c <env_root>/config/tranqu/config.yaml \
+          -l <env_root>/config/tranqu/logging.yaml
+      ```
+
+   - For `gateway`:
+
+      ```bash
+      uv run --project <install_root>/gateway-<version> python -m device_gateway.service \
+          -c <env_root>/config/gateway/config.yaml \
+          -l <env_root>/config/gateway/logging.yaml
+      ```
 
 ### 8.6 stop
 

@@ -29,7 +29,7 @@ This document tracks the current status of the OQTOPUS CLI specification.
 ### Main specification documents
 
 - `docs/oqtopus-cli.md`: product-level CLI specification
-- `docs/copilot-implementation-brief.md`: implementation handoff for the shell PoC
+- `docs/implementation/copilot-implementation-brief.md`: implementation handoff for the shell PoC
 - `docs/install-sh.md`: installer specification
 
 ### Backend environment structure
@@ -46,8 +46,8 @@ This document tracks the current status of the OQTOPUS CLI specification.
 ```
 
 - `config/` contains configuration files for each microservice.
-- `logs/` contains log files for each microservice.
-- `pids/` contains process ID files for each microservice.
+- `logs/` contains one subdirectory for each managed service.
+- `pids/` contains PID files named `<component>.pid`.
 
 ### Backend components
 
@@ -92,6 +92,8 @@ The backend components currently in scope are:
 - Service configuration files are stored under `templates/backend/`.
 - Required initial config files are whatever is present under
   `templates/backend/` at init time.
+- The expected `templates/backend/config/` tree is defined in
+  `docs/oqtopus-cli.md`.
 
 ### Installer behavior
 
@@ -119,6 +121,10 @@ The backend components currently in scope are:
    ```text
    https://api.github.com/repos/oqtopus-team/oqtopus-cli/tags?per_page=100
    ```
+- For now, inspecting up to 100 tags is considered sufficient.
+- If the tags API response contains 100 tags, the CLI should print a warning
+  that additional tags may exist and latest version resolution may be
+  incomplete.
 
 - The installer downloads:
 
@@ -133,6 +139,8 @@ The backend components currently in scope are:
 - Error messages should be conventional and user-friendly.
 - Error messages should explain what failed and why.
 - If exact wording is unclear, it should be confirmed before finalizing.
+- `docs/oqtopus-cli.md` contains representative error message examples for
+  install, uninstall, start, and stop failures.
 
 ### Process lifecycle behavior
 
@@ -163,21 +171,21 @@ The backend components currently in scope are:
 - The CLI should show the list of deletion targets before prompting.
 - `oqtopus backend prune --yes` skips the interactive confirmation.
 - PoC behavior and Rust behavior should match.
+- The interactive prompt should follow a conventional `Proceed? [y/N]:`
+  pattern.
 
 ### Runtime model
 
 - All managed backend processes are run via `uv`.
-- The exact start command is currently fixed only for `tranqu`.
-- Start invocations for the other managed services still need to be defined.
+- `core`, `sse_engine`, `mitigator`, `estimator`, and `combiner` are launched
+  from the installed `engine` release.
+- `core`, `sse_engine`, `mitigator`, `estimator`, and `combiner` are
+  independent managed services.
+- `tranqu` is launched from the installed `tranqu` release.
+- `gateway` is launched from the installed `gateway` release.
+- Exact `uv run` start commands are now defined in `docs/oqtopus-cli.md`.
 
 ## Undecided
-
-### Start commands
-
-- What are the exact `uv run` invocations for `engine`?
-- What are the exact `uv run` invocations for `gateway`?
-- Are `core`, `sse_engine`, `mitigator`, `estimator`, and `combiner` real
-  managed services or temporary placeholders?
 
 ## Deferred
 
