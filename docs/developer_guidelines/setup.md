@@ -27,8 +27,7 @@ The repository is organized as follows:
 ```text
 oqtopus-cli/
 ├─ docs/          # Documentation sources (MkDocs)
-├─ config/        # Example configuration files (optional)
-├─ .vscode/       # VSCode settings (optional)
+├─ .vscode/       # VSCode settings
 ├─ .github/       # GitHub workflows and repository settings
 ├─ pyproject.toml # Project configuration and dependencies
 ├─ Makefile       # Development commands
@@ -71,7 +70,6 @@ make docs-build
 ### Start the Documentation Server
 
 This project uses [MkDocs](https://www.mkdocs.org/) to generate the HTML documentation and
-[mkdocstrings-python](https://mkdocstrings.github.io/python/) to generate the Python API reference.  
 Start the documentation server with:
 
 ```shell
