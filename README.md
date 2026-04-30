@@ -1,5 +1,5 @@
 <!-- markdownlint-disable MD041 -->
-![OQTOPUS logo](./asset/oqtopus-logo.png)
+![OQTOPUS logo](./docs/asset/oqtopus-logo.png)
 
 # OQTOPUS CLI (Command Line Interface)
 
