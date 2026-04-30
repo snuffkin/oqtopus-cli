@@ -169,6 +169,7 @@ The backend components currently in scope are:
 
 - `oqtopus backend prune` requires confirmation before deletion.
 - The CLI should show the list of deletion targets before prompting.
+- The CLI may include the deletion target count in the prompt output.
 - `oqtopus backend prune --yes` skips the interactive confirmation.
 - PoC behavior and Rust behavior should match.
 - The interactive prompt should follow a conventional `Proceed? [y/N]:`
@@ -184,8 +185,6 @@ The backend components currently in scope are:
 - `tranqu` is launched from the installed `tranqu` release.
 - `gateway` is launched from the installed `gateway` release.
 - Exact `uv run` start commands are now defined in `docs/oqtopus-cli.md`.
-
-## Undecided
 
 ## Deferred
 

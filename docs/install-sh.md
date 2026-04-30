@@ -67,6 +67,13 @@ For now, inspecting up to 100 tags is considered sufficient.
 If the API response contains 100 tags, `install.sh` SHOULD print a warning that
 additional tags may exist and the latest version resolution may be incomplete.
 
+Suggested warning:
+
+```text
+Warning: the GitHub tags API returned 100 tags.
+Additional tags may exist, so latest version resolution may be incomplete.
+```
+
 Version comparison MUST follow semantic version ordering, not plain string
 comparison.
 

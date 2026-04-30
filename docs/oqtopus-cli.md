@@ -265,6 +265,13 @@ Execution Flow:
    - The tags API request SHOULD use `?per_page=100`.
    - If the tags API response contains 100 tags, the CLI SHOULD print a warning
      that additional tags may exist and latest version resolution may be incomplete.
+   - Suggested warning:
+
+```text
+Warning: the GitHub tags API returned 100 tags.
+Additional tags may exist, so latest version resolution may be incomplete.
+```
+
    - Pre-release tags are excluded from automatic latest selection.
 
 2. Directory Preparation:
@@ -337,7 +344,7 @@ oqtopus backend prune
 Suggested interactive prompt:
 
 ```text
-The following installed releases will be deleted:
+The following installed releases will be deleted (2):
   - /home/user/.local/share/oqtopus/backend/releases/engine-v1.2.0
   - /home/user/.local/share/oqtopus/backend/releases/tranqu-v0.4.1
 
