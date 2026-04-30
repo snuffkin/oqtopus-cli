@@ -26,7 +26,7 @@ It provides a installer of the backend components of OQTOPUS.
 
 ## Citation
 
-Citation information is also available in the [CITATION](https://github.com/oqtopus-team/tranqu/blob/main/CITATION.cff) file.
+Citation information is also available in the [CITATION](https://github.com/oqtopus-team/oqtopus-cli/blob/main/CITATION.cff) file.
 
 ## Contact
 
@@ -36,8 +36,4 @@ You can contact us by creating an issue in this repository or by email:
 
 ## License
 
-python-project-template is released under the [Apache License 2.0](https://github.com/oqtopus-team/python-project-template/blob/main/LICENSE).
-
-## Supporting
-
-Describe supporting organizations, grants, or contributors here.
+OQTOPUS CLI is released under the [Apache License 2.0](https://github.com/oqtopus-team/oqtopus-cli/blob/main/LICENSE).
