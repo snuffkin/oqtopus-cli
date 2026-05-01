@@ -566,7 +566,7 @@ Templates are stored in the `templates/` directory of the official repository:
 - No Python dependency in the CLI itself.
 
 The `scripts/install.sh` behavior is specified separately in
-`docs/install-sh.md`.
+`install-sh.md`.
 
 ## 12. Future Extensions
 

@@ -15,7 +15,7 @@ top-level CLI named `oqtopus`.
 
 Use the following repository layout:
 
-- `docs/`: specifications and implementation planning documents
+- `spec/`: specifications and implementation planning documents
 - `templates/`: environment templates used by `oqtopus init`
 - `scripts/`: helper scripts such as `install.sh`
 - `bin/oqtopus`: shell-based CLI entrypoint for the current PoC

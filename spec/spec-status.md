@@ -20,7 +20,7 @@ This document tracks the current status of the OQTOPUS CLI specification.
 
 ### Repository layout
 
-- `docs/`: specifications and implementation planning documents
+- `spec/`: specifications and implementation planning documents
 - `templates/`: environment templates used by `oqtopus init`
 - `scripts/`: helper scripts such as `install.sh`
 - `bin/oqtopus`: current shell-based CLI entrypoint
@@ -28,9 +28,9 @@ This document tracks the current status of the OQTOPUS CLI specification.
 
 ### Main specification documents
 
-- `docs/oqtopus-cli.md`: product-level CLI specification
-- `docs/implementation/copilot-implementation-brief.md`: implementation handoff for the shell PoC
-- `docs/install-sh.md`: installer specification
+- `spec/oqtopus-cli.md`: product-level CLI specification
+- `spec/implementation/copilot-implementation-brief.md`: implementation handoff for the shell PoC
+- `spec/install-sh.md`: installer specification
 
 ### Backend environment structure
 
@@ -93,7 +93,7 @@ The backend components currently in scope are:
 - Required initial config files are whatever is present under
   `templates/backend/` at init time.
 - The expected `templates/backend/config/` tree is defined in
-  `docs/oqtopus-cli.md`.
+  `spec/oqtopus-cli.md`.
 
 ### Installer behavior
 
@@ -139,7 +139,7 @@ The backend components currently in scope are:
 - Error messages should be conventional and user-friendly.
 - Error messages should explain what failed and why.
 - If exact wording is unclear, it should be confirmed before finalizing.
-- `docs/oqtopus-cli.md` contains representative error message examples for
+- `spec/oqtopus-cli.md` contains representative error message examples for
   install, uninstall, start, and stop failures.
 
 ### Process lifecycle behavior
@@ -184,7 +184,7 @@ The backend components currently in scope are:
   independent managed services.
 - `tranqu` is launched from the installed `tranqu` release.
 - `gateway` is launched from the installed `gateway` release.
-- Exact `uv run` start commands are now defined in `docs/oqtopus-cli.md`.
+- Exact `uv run` start commands are now defined in `spec/oqtopus-cli.md`.
 
 ## Deferred
 
