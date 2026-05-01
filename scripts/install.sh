@@ -186,6 +186,14 @@ install_binary() {
     die "failed to install oqtopus to $target_bin."
   fi
 
+  target_tmp="$target_bin.tmp.$$"
+  if sed "s|^CLI_VERSION=.*|CLI_VERSION=\"\${OQTOPUS_CLI_VERSION:-$VERSION}\"|" "$target_bin" > "$target_tmp"; then
+    mv "$target_tmp" "$target_bin"
+  else
+    rm -f "$target_tmp" || true
+    warn "could not embed installed version into $target_bin"
+  fi
+
   if ! chmod +x "$target_bin"; then
     die "failed to mark $target_bin as executable."
   fi
@@ -267,6 +275,8 @@ main() {
   require_command chmod
   require_command mkdir
   require_command cp
+  require_command sed
+  require_command mv
   require_command find
   require_command dirname
 

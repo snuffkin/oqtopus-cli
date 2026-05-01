@@ -1,0 +1,969 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CLI_VERSION="${OQTOPUS_CLI_VERSION:-dev}"
+CLI_REPO_OWNER="oqtopus-team"
+CLI_REPO_NAME="oqtopus-cli"
+TEMPLATE_BRANCH="main"
+
+ENGINE_REPO="oqtopus-team/oqtopus-engine"
+TRANQU_REPO="oqtopus-team/tranqu-server"
+GATEWAY_REPO="oqtopus-team/device-gateway"
+
+INSTALL_COMPONENTS=(engine tranqu gateway)
+ENGINE_SERVICES=(core sse_engine mitigator estimator combiner)
+SERVICES=(core sse_engine mitigator estimator combiner tranqu gateway)
+START_ALL_ORDER=(gateway tranqu mitigator estimator combiner sse_engine core)
+STOP_ALL_ORDER=(core sse_engine combiner estimator mitigator tranqu gateway)
+
+ENV_ROOT=""
+INSTALL_ROOT=""
+
+log() {
+  printf '%s\n' "$*"
+}
+
+warn() {
+  printf 'Warning: %s\n' "$*" >&2
+}
+
+die() {
+  printf 'Error: %s\n' "$*" >&2
+  exit 1
+}
+
+need_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    die "'$1' is required but was not found on PATH."
+  fi
+}
+
+usage_top() {
+  cat <<'EOF'
+Usage:
+  oqtopus <command> [args]
+
+Commands:
+  init         Create an OQTOPUS environment.
+  backend      Manage local backend components and services.
+  completion   Print shell completion scripts.
+  version      Print the installed CLI version.
+  help         Show help.
+
+Run 'oqtopus <command> help' for command-specific help.
+EOF
+}
+
+usage_init() {
+  cat <<'EOF'
+Usage:
+  oqtopus init <env_name> --template backend
+
+Creates a local OQTOPUS backend environment from the official template.
+EOF
+}
+
+usage_backend() {
+  cat <<'EOF'
+Usage:
+  oqtopus backend <command> [args]
+
+Commands:
+  install         Install backend component releases.
+  uninstall       Remove an unreferenced installed release.
+  update          Install the latest release of a component.
+  prune           Delete unreferenced installed releases.
+  start           Start a managed service.
+  stop            Stop a managed service.
+  status          Show process status.
+  device-status   Show or update gateway device status.
+  info            Show backend environment information.
+  help            Show help.
+EOF
+}
+
+usage_backend_install() {
+  cat <<'EOF'
+Usage:
+  oqtopus backend install <engine|tranqu|gateway> [version]
+  oqtopus backend install all
+EOF
+}
+
+usage_backend_uninstall() {
+  cat <<'EOF'
+Usage:
+  oqtopus backend uninstall <engine|tranqu|gateway> <version>
+EOF
+}
+
+usage_backend_update() {
+  cat <<'EOF'
+Usage:
+  oqtopus backend update <engine|tranqu|gateway>
+EOF
+}
+
+usage_backend_prune() {
+  cat <<'EOF'
+Usage:
+  oqtopus backend prune [--yes]
+EOF
+}
+
+usage_backend_start() {
+  cat <<'EOF'
+Usage:
+  oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+EOF
+}
+
+usage_backend_stop() {
+  cat <<'EOF'
+Usage:
+  oqtopus backend stop <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+EOF
+}
+
+usage_backend_device_status() {
+  cat <<'EOF'
+Usage:
+  oqtopus backend device-status <show|active|inactive|maintenance>
+EOF
+}
+
+usage_completion() {
+  cat <<'EOF'
+Usage:
+  oqtopus completion <bash|zsh|fish>
+EOF
+}
+
+is_in_list() {
+  local needle=$1
+  shift
+  local item
+  for item in "$@"; do
+    [[ "$item" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+abs_path() {
+  local path=$1
+  if [[ -d "$path" ]]; then
+    (cd "$path" && pwd -P)
+  else
+    local dir base
+    dir=$(dirname "$path")
+    base=$(basename "$path")
+    (cd "$dir" && printf '%s/%s\n' "$(pwd -P)" "$base")
+  fi
+}
+
+data_root() {
+  if [[ -n "${XDG_DATA_HOME:-}" ]]; then
+    printf '%s/oqtopus/backend/releases\n' "$XDG_DATA_HOME"
+  else
+    printf '%s/.local/share/oqtopus/backend/releases\n' "$HOME"
+  fi
+}
+
+registry_path() {
+  if [[ -n "${XDG_CONFIG_HOME:-}" ]]; then
+    printf '%s/oqtopus/backend/environments.json\n' "$XDG_CONFIG_HOME"
+  else
+    printf '%s/.config/oqtopus/backend/environments.json\n' "$HOME"
+  fi
+}
+
+metadata_get() {
+  local key=$1
+  local file=${2:-.metadata}
+  [[ -f "$file" ]] || return 1
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; found=1; exit } END { exit found ? 0 : 1 }' "$file"
+}
+
+metadata_set() {
+  local key=$1
+  local value=$2
+  local file=${3:-.metadata}
+  local tmp
+  tmp=$(mktemp "${file}.tmp.XXXXXX")
+  if [[ -f "$file" ]] && grep -q "^${key}=" "$file"; then
+    awk -v key="$key" -v value="$value" 'BEGIN { done=0 } $0 ~ "^" key "=" { print key "=" value; done=1; next } { print } END { if (!done) print key "=" value }' "$file" > "$tmp"
+  else
+    [[ -f "$file" ]] && cat "$file" > "$tmp"
+    printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  fi
+  mv "$tmp" "$file"
+}
+
+component_repo() {
+  case "$1" in
+    engine) printf '%s\n' "$ENGINE_REPO" ;;
+    tranqu) printf '%s\n' "$TRANQU_REPO" ;;
+    gateway) printf '%s\n' "$GATEWAY_REPO" ;;
+    *) return 1 ;;
+  esac
+}
+
+component_binding_key() {
+  printf '%s_version\n' "$1"
+}
+
+service_component() {
+  case "$1" in
+    core|sse_engine|mitigator|estimator|combiner) printf 'engine\n' ;;
+    tranqu) printf 'tranqu\n' ;;
+    gateway) printf 'gateway\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+service_module() {
+  case "$1" in
+    core|sse_engine) printf 'oqtopus_engine_core.app\n' ;;
+    mitigator) printf 'oqtopus_engine_mitigator.app\n' ;;
+    estimator) printf 'oqtopus_engine_estimator.app\n' ;;
+    combiner) printf 'oqtopus_engine_combiner.app\n' ;;
+    tranqu) printf 'tranqu_server.proto.service\n' ;;
+    gateway) printf 'device_gateway.service\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+ensure_registry_file() {
+  need_command jq
+  local registry
+  registry=$(registry_path)
+  mkdir -p "$(dirname "$registry")"
+  if [[ ! -f "$registry" ]]; then
+    printf '[]\n' > "$registry"
+  elif ! jq -e 'type == "array"' "$registry" >/dev/null 2>&1; then
+    die "invalid registry file: $registry"
+  fi
+}
+
+register_env() {
+  local env_path=$1
+  local registry tmp
+  ensure_registry_file
+  registry=$(registry_path)
+  tmp=$(mktemp "${registry}.tmp.XXXXXX")
+  jq --arg env "$env_path" 'if index($env) then . else . + [$env] end' "$registry" > "$tmp"
+  mv "$tmp" "$registry"
+}
+
+load_registry_entries() {
+  local registry
+  ensure_registry_file
+  registry=$(registry_path)
+  jq -r '.[]' "$registry"
+}
+
+write_registry_entries() {
+  local tmp_file=$1
+  local registry tmp
+  ensure_registry_file
+  registry=$(registry_path)
+  tmp=$(mktemp "${registry}.tmp.XXXXXX")
+  jq -R -s 'split("\n") | map(select(length > 0))' "$tmp_file" > "$tmp"
+  mv "$tmp" "$registry"
+}
+
+validate_backend_env() {
+  local current template metadata_env_root
+  [[ -f .metadata ]] || die $'.metadata not found.\nThis directory is not an OQTOPUS backend environment.'
+  template=$(metadata_get template) || die "invalid .metadata: missing template."
+  [[ "$template" == "backend" ]] || die "invalid environment template. Found template='$template', but 'oqtopus backend' requires template='backend'."
+  metadata_env_root=$(metadata_get env_root) || die "invalid .metadata: missing env_root."
+  current=$(pwd -P)
+  if [[ "$metadata_env_root" != "$current" ]]; then
+    die $'Current directory does not match env_root.\n'"env_root = $metadata_env_root"$'\n'"current  = $current"
+  fi
+  ENV_ROOT="$metadata_env_root"
+  INSTALL_ROOT=$(metadata_get install_root) || die "invalid .metadata: missing install_root."
+  register_env "$ENV_ROOT"
+}
+
+resolve_latest_version() {
+  local repo=$1
+  local tags_url tags_json tag_count latest
+  need_command curl
+  need_command jq
+  tags_url="https://api.github.com/repos/${repo}/tags?per_page=100"
+  tags_json=$(curl -fsSL "$tags_url") || die "failed to query GitHub tags API: $tags_url"
+  tag_count=$(jq 'length' <<< "$tags_json")
+  if [[ "$tag_count" == "100" ]]; then
+    warn "the GitHub tags API returned 100 tags."
+    warn "Additional tags may exist, so latest version resolution may be incomplete."
+  fi
+  latest=$(jq -r '[.[].name as $tag | $tag | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | capture("^v(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)$") + {tag: $tag}] | sort_by(.major|tonumber, .minor|tonumber, .patch|tonumber) | last | .tag // empty' <<< "$tags_json")
+  [[ -n "$latest" ]] || die "could not resolve a latest stable version from GitHub tags for $repo."
+  printf '%s\n' "$latest"
+}
+
+download_and_extract_release() {
+  local component=$1
+  local version=$2
+  local target_dir=$3
+  local repo archive tmp_dir url
+  need_command curl
+  need_command tar
+  repo=$(component_repo "$component")
+  tmp_dir=$(mktemp -d)
+  archive="$tmp_dir/${component}-${version}.tar.gz"
+  url="https://github.com/${repo}/archive/refs/tags/${version}.tar.gz"
+  curl -fsSL "$url" -o "$archive" || die "failed to download $component $version from $url."
+  mkdir -p "$target_dir"
+  tar -xzf "$archive" -C "$target_dir" --strip-components=1 || die "failed to extract $component $version."
+  rm -rf "$tmp_dir"
+}
+
+load_env_var_from_config() {
+  local key=$1
+  local file="$ENV_ROOT/config/.env"
+  [[ -f "$file" ]] || return 1
+  awk -F= -v key="$key" '
+    $0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/ { next }
+    $1 == key {
+      sub(/^[^=]*=/, "")
+      gsub(/^["'\'']|["'\'']$/, "")
+      print
+      found=1
+      exit
+    }
+    END { exit found ? 0 : 1 }
+  ' "$file"
+}
+
+build_sse_runtime() {
+  local version=$1
+  local runtime_dir dockerfile image uid gid
+  need_command docker
+  runtime_dir="$INSTALL_ROOT/engine-${version}/sse_runtime"
+  dockerfile="$runtime_dir/Dockerfile"
+  [[ -f "$dockerfile" ]] || die "sse_runtime Dockerfile not found: $dockerfile"
+  image=$(load_env_var_from_config SSE_CONTAINER_IMAGE) || die "SSE_CONTAINER_IMAGE is missing from config/.env."
+  uid=$(load_env_var_from_config UID) || die "UID is missing from config/.env."
+  gid=$(load_env_var_from_config GID) || die "GID is missing from config/.env."
+  docker build "$runtime_dir" -t "$image" --build-arg "UID=$uid" --build-arg "GID=$gid" || die "failed to build sse_runtime Docker image."
+}
+
+install_component() {
+  local component=$1
+  local version=${2:-}
+  local repo target_dir binding_key
+  is_in_list "$component" "${INSTALL_COMPONENTS[@]}" || die "unknown component: $component"
+  need_command uv
+  repo=$(component_repo "$component")
+  if [[ -z "$version" ]]; then
+    version=$(resolve_latest_version "$repo")
+  fi
+  target_dir="$INSTALL_ROOT/${component}-${version}"
+  binding_key=$(component_binding_key "$component")
+  mkdir -p "$INSTALL_ROOT"
+  if [[ -d "$target_dir/.venv" ]]; then
+    log "$component $version is already installed; reusing $target_dir"
+  else
+    if [[ -e "$target_dir" ]]; then
+      log "Removing incomplete installation: $target_dir"
+      rm -rf "$target_dir"
+    fi
+    log "Installing $component $version"
+    download_and_extract_release "$component" "$version" "$target_dir"
+    uv sync --frozen --no-dev --project "$target_dir" || die "failed to synchronize $component $version with uv."
+  fi
+  if [[ "$component" == "engine" ]]; then
+    build_sse_runtime "$version"
+  fi
+  metadata_set "$binding_key" "$version"
+  log "Bound $binding_key=$version"
+}
+
+download_backend_template() {
+  local env_dir=$1
+  local tmp_dir archive extract_dir template_dir url
+  need_command curl
+  need_command tar
+  need_command cp
+  need_command find
+  tmp_dir=$(mktemp -d)
+  archive="$tmp_dir/${CLI_REPO_NAME}-${TEMPLATE_BRANCH}.tar.gz"
+  extract_dir="$tmp_dir/extract"
+  url="https://github.com/${CLI_REPO_OWNER}/${CLI_REPO_NAME}/archive/refs/heads/${TEMPLATE_BRANCH}.tar.gz"
+  mkdir -p "$extract_dir"
+  curl -fsSL "$url" -o "$archive" || die "failed to download backend template archive."
+  tar -xzf "$archive" -C "$extract_dir" || die "failed to extract backend template archive."
+  template_dir=$(find "$extract_dir" -type d -path "*/templates/backend" | head -n 1)
+  [[ -n "$template_dir" ]] || die "templates/backend was not found in the downloaded archive."
+  cp -R "$template_dir"/. "$env_dir"/
+  rm -rf "$tmp_dir"
+}
+
+cmd_init() {
+  if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+    usage_init
+    return
+  fi
+  local env_name=${1:-}
+  local flag=${2:-}
+  local template=${3:-}
+  [[ -n "$env_name" && "$flag" == "--template" && -n "$template" && $# -eq 3 ]] || { usage_init; exit 1; }
+  [[ "$template" == "backend" ]] || die "template '$template' is not implemented."
+  [[ ! -e "$env_name" ]] || die "target directory already exists: $env_name"
+  mkdir -p "$env_name"
+  local env_abs install_root created_at
+  env_abs=$(abs_path "$env_name")
+  download_backend_template "$env_abs"
+  mkdir -p \
+    "$env_abs/pids" \
+    "$env_abs/sse_work" \
+    "$env_abs/logs/core" \
+    "$env_abs/logs/sse_engine" \
+    "$env_abs/logs/mitigator" \
+    "$env_abs/logs/estimator" \
+    "$env_abs/logs/combiner" \
+    "$env_abs/logs/tranqu" \
+    "$env_abs/logs/gateway"
+  install_root=$(data_root)
+  created_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  cat > "$env_abs/.metadata" <<EOF
+template=backend
+install_root=$install_root
+env_root=$env_abs
+created_at=$created_at
+EOF
+  register_env "$env_abs"
+  log "Created backend environment: $env_abs"
+}
+
+cmd_backend_install() {
+  if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+    usage_backend_install
+    return
+  fi
+  validate_backend_env
+  local component=${1:-}
+  local version=${2:-}
+  [[ -n "$component" ]] || { usage_backend_install; exit 1; }
+  if [[ "$component" == "all" ]]; then
+    [[ -z "$version" && $# -eq 1 ]] || die "oqtopus backend install all does not accept a version argument."
+    local item
+    for item in "${INSTALL_COMPONENTS[@]}"; do
+      install_component "$item"
+    done
+    return
+  fi
+  [[ $# -le 2 ]] || { usage_backend_install; exit 1; }
+  install_component "$component" "$version"
+}
+
+cmd_backend_update() {
+  if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+    usage_backend_update
+    return
+  fi
+  validate_backend_env
+  local component=${1:-}
+  [[ -n "$component" && $# -eq 1 ]] || { usage_backend_update; exit 1; }
+  install_component "$component"
+}
+
+version_is_referenced() {
+  local component=$1
+  local version=$2
+  local key env_path
+  key=$(component_binding_key "$component")
+  while IFS= read -r env_path; do
+    [[ -f "$env_path/.metadata" ]] || continue
+    if [[ "$(metadata_get "$key" "$env_path/.metadata" 2>/dev/null || true)" == "$version" ]]; then
+      printf '%s\n' "$env_path"
+      return 0
+    fi
+  done < <(load_registry_entries)
+  return 1
+}
+
+cmd_backend_uninstall() {
+  if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+    usage_backend_uninstall
+    return
+  fi
+  validate_backend_env
+  local component=${1:-}
+  local version=${2:-}
+  local target_dir referenced_by
+  [[ -n "$component" && -n "$version" && $# -eq 2 ]] || { usage_backend_uninstall; exit 1; }
+  is_in_list "$component" "${INSTALL_COMPONENTS[@]}" || die "unknown component: $component"
+  referenced_by=$(version_is_referenced "$component" "$version" || true)
+  [[ -z "$referenced_by" ]] || die "cannot uninstall '$component' version '$version'. The version is still referenced by $referenced_by."
+  target_dir="$INSTALL_ROOT/${component}-${version}"
+  [[ -d "$target_dir" ]] || die "installed release not found: $target_dir"
+  rm -rf "$target_dir"
+  log "Removed $target_dir"
+}
+
+collect_active_bindings() {
+  local output_file=$1
+  local clean_registry_file=$2
+  local env_path component key version
+  : > "$output_file"
+  : > "$clean_registry_file"
+  while IFS= read -r env_path; do
+    [[ -d "$env_path" && -f "$env_path/.metadata" ]] || continue
+    printf '%s\n' "$env_path" >> "$clean_registry_file"
+    for component in "${INSTALL_COMPONENTS[@]}"; do
+      key=$(component_binding_key "$component")
+      version=$(metadata_get "$key" "$env_path/.metadata" 2>/dev/null || true)
+      [[ -n "$version" ]] && printf '%s-%s\n' "$component" "$version" >> "$output_file"
+    done
+  done < <(load_registry_entries)
+}
+
+cmd_backend_prune() {
+  if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+    usage_backend_prune
+    return
+  fi
+  validate_backend_env
+  local yes=0
+  if [[ "${1:-}" == "--yes" ]]; then
+    yes=1
+    shift
+  fi
+  [[ $# -eq 0 ]] || { usage_backend_prune; exit 1; }
+  local tmp_dir active clean targets target basename answer count
+  tmp_dir=$(mktemp -d)
+  active="$tmp_dir/active"
+  clean="$tmp_dir/registry"
+  targets="$tmp_dir/targets"
+  collect_active_bindings "$active" "$clean"
+  write_registry_entries "$clean"
+  : > "$targets"
+  if [[ -d "$INSTALL_ROOT" ]]; then
+    while IFS= read -r target; do
+      basename=$(basename "$target")
+      if ! grep -qxF "$basename" "$active"; then
+        printf '%s\n' "$target" >> "$targets"
+      fi
+    done < <(find "$INSTALL_ROOT" -mindepth 1 -maxdepth 1 -type d \( -name 'engine-v*' -o -name 'tranqu-v*' -o -name 'gateway-v*' \) | sort)
+  fi
+  count=$(wc -l < "$targets" | tr -d ' ')
+  if [[ "$count" == "0" ]]; then
+    log "No unreferenced installed releases found."
+    rm -rf "$tmp_dir"
+    return
+  fi
+  log "The following installed releases will be deleted ($count):"
+  sed 's/^/  - /' "$targets"
+  if [[ "$yes" -ne 1 ]]; then
+    printf 'Proceed? [y/N]: '
+    read -r answer
+    [[ "$answer" == "y" || "$answer" == "Y" ]] || { log "Aborted."; rm -rf "$tmp_dir"; return; }
+  fi
+  while IFS= read -r target; do
+    rm -rf "$target"
+    log "Deleted $target"
+  done < "$targets"
+  rm -rf "$tmp_dir"
+}
+
+pid_alive() {
+  local pid=$1
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" >/dev/null 2>&1
+}
+
+load_env_exports() {
+  local file="$ENV_ROOT/config/.env"
+  [[ -f "$file" ]] || return 0
+  local line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" == *=* ]] || continue
+    key=${line%%=*}
+    value=${line#*=}
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    value=${value%$'\r'}
+    if [[ "$value" =~ ^\".*\"$ || "$value" =~ ^\'.*\'$ ]]; then
+      value=${value:1:${#value}-2}
+    fi
+    export "$key=$value"
+  done < "$file"
+}
+
+service_command() {
+  local service=$1
+  local component version project module
+  component=$(service_component "$service")
+  version=$(metadata_get "$(component_binding_key "$component")") || die "cannot start '$service'. Missing ${component}_version in .metadata."
+  project="$INSTALL_ROOT/${component}-${version}"
+  [[ -d "$project" ]] || die "cannot start '$service'. Installed release directory not found: $project"
+  module=$(service_module "$service")
+  printf '%q ' uv run --project "$project" python -m "$module" -c "$ENV_ROOT/config/$service/config.yaml" -l "$ENV_ROOT/config/$service/logging.yaml"
+}
+
+start_service() {
+  local service=$1
+  local pid_file="$ENV_ROOT/pids/${service}.pid"
+  local pid cmd
+  is_in_list "$service" "${SERVICES[@]}" || die "unknown service: $service"
+  mkdir -p "$ENV_ROOT/pids"
+  if [[ -f "$pid_file" ]]; then
+    pid=$(cat "$pid_file")
+    if pid_alive "$pid"; then
+      die "cannot start '$service'. The component appears to be already running (PID $pid)."
+    fi
+    rm -f "$pid_file"
+  fi
+  need_command uv
+  cmd=$(service_command "$service")
+  (
+    cd "$ENV_ROOT"
+    load_env_exports
+    eval "exec $cmd" >/dev/null 2>&1
+  ) &
+  pid=$!
+  printf '%s\n' "$pid" > "$pid_file"
+  sleep 0.2
+  if ! pid_alive "$pid"; then
+    rm -f "$pid_file"
+    die "failed to start '$service'. The process exited immediately."
+  fi
+  log "Started $service (PID $pid)"
+}
+
+cmd_backend_start() {
+  if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+    usage_backend_start
+    return
+  fi
+  validate_backend_env
+  local target=${1:-}
+  [[ -n "$target" && $# -eq 1 ]] || { usage_backend_start; exit 1; }
+  if [[ "$target" == "all" ]]; then
+    local service
+    for service in "${START_ALL_ORDER[@]}"; do
+      start_service "$service"
+    done
+  else
+    start_service "$target"
+  fi
+}
+
+stop_service() {
+  local service=$1
+  local pid_file="$ENV_ROOT/pids/${service}.pid"
+  local pid i
+  is_in_list "$service" "${SERVICES[@]}" || die "unknown service: $service"
+  if [[ ! -f "$pid_file" ]]; then
+    log "$service: Stopped"
+    return 0
+  fi
+  pid=$(cat "$pid_file")
+  if ! pid_alive "$pid"; then
+    rm -f "$pid_file"
+    log "$service: Stopped"
+    return 0
+  fi
+  if ! kill -TERM "$pid"; then
+    printf "Error: failed to stop '%s'. Could not send TERM to PID %s.\n" "$service" "$pid" >&2
+    return 1
+  fi
+  for i in 1 2 3 4 5; do
+    sleep 1
+    if ! pid_alive "$pid"; then
+      rm -f "$pid_file"
+      log "Stopped $service"
+      return 0
+    fi
+  done
+  printf "Error: failed to stop '%s'. The process did not exit within 5 seconds after TERM was sent.\n" "$service" >&2
+  return 1
+}
+
+cmd_backend_stop() {
+  if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+    usage_backend_stop
+    return
+  fi
+  validate_backend_env
+  local target=${1:-}
+  [[ -n "$target" && $# -eq 1 ]] || { usage_backend_stop; exit 1; }
+  if [[ "$target" == "all" ]]; then
+    local service status=0
+    for service in "${STOP_ALL_ORDER[@]}"; do
+      if ! stop_service "$service"; then
+        status=1
+      fi
+    done
+    return "$status"
+  fi
+  stop_service "$target"
+}
+
+cmd_backend_status() {
+  validate_backend_env
+  local service pid_file pid
+  for service in "${SERVICES[@]}"; do
+    pid_file="$ENV_ROOT/pids/${service}.pid"
+    if [[ -f "$pid_file" ]]; then
+      pid=$(cat "$pid_file")
+      if pid_alive "$pid"; then
+        printf '%s: Running (PID %s)\n' "$service" "$pid"
+      else
+        printf '%s: Stopped\n' "$service"
+      fi
+    else
+      printf '%s: Stopped\n' "$service"
+    fi
+  done
+}
+
+cmd_backend_device_status() {
+  if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+    usage_backend_device_status
+    return
+  fi
+  validate_backend_env
+  local action=${1:-}
+  local status_file="$ENV_ROOT/config/gateway/device_status"
+  [[ -f "$status_file" ]] || die "device status file not found: $status_file"
+  case "$action" in
+    show)
+      cat "$status_file"
+      ;;
+    active|inactive|maintenance)
+      printf '%s\n' "$action" > "$status_file"
+      log "$action"
+      ;;
+    *)
+      usage_backend_device_status
+      exit 1
+      ;;
+  esac
+}
+
+cmd_backend_info() {
+  validate_backend_env
+  local component version dir python_path python_version
+  log "=== Environment (.metadata) ==="
+  cat .metadata
+  log ""
+  python_path=$(command -v python3 || command -v python || true)
+  if [[ -n "$python_path" ]]; then
+    python_version=$("$python_path" --version 2>&1 || true)
+  else
+    python_version="not found"
+  fi
+  log "python_path = ${python_path:-not found}"
+  log "python_version = $python_version"
+  log ""
+  log "install_root = $INSTALL_ROOT"
+  log ""
+  log "=== Installed Backend Releases ==="
+  for component in "${INSTALL_COMPONENTS[@]}"; do
+    printf '%s:' "$component"
+    if [[ -d "$INSTALL_ROOT" ]]; then
+      while IFS= read -r dir; do
+        version=${dir##*/${component}-}
+        printf ' %s' "$version"
+      done < <(find "$INSTALL_ROOT" -mindepth 1 -maxdepth 1 -type d -name "${component}-v*" | sort)
+    fi
+    printf '\n'
+  done
+}
+
+cmd_backend() {
+  case "${1:-}" in
+    help|--help|"")
+      usage_backend
+      ;;
+    install)
+      shift
+      cmd_backend_install "$@"
+      ;;
+    uninstall)
+      shift
+      cmd_backend_uninstall "$@"
+      ;;
+    update)
+      shift
+      cmd_backend_update "$@"
+      ;;
+    prune)
+      shift
+      cmd_backend_prune "$@"
+      ;;
+    start)
+      shift
+      cmd_backend_start "$@"
+      ;;
+    stop)
+      shift
+      cmd_backend_stop "$@"
+      ;;
+    status)
+      shift
+      [[ $# -eq 0 ]] || die "oqtopus backend status does not accept arguments."
+      cmd_backend_status
+      ;;
+    device-status)
+      shift
+      cmd_backend_device_status "$@"
+      ;;
+    info)
+      shift
+      [[ $# -eq 0 ]] || die "oqtopus backend info does not accept arguments."
+      cmd_backend_info
+      ;;
+    *)
+      die "unknown backend command: $1"
+      ;;
+  esac
+}
+
+completion_bash() {
+  cat <<'EOF'
+_oqtopus()
+{
+  local cur prev words cword
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+  prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+  case "${COMP_WORDS[1]}" in
+    backend)
+      case "${COMP_WORDS[2]}" in
+        install)
+          COMPREPLY=( $(compgen -W "engine tranqu gateway all help --help" -- "$cur") )
+          return 0
+          ;;
+        update|uninstall)
+          COMPREPLY=( $(compgen -W "engine tranqu gateway help --help" -- "$cur") )
+          return 0
+          ;;
+        start|stop)
+          COMPREPLY=( $(compgen -W "core sse_engine mitigator estimator combiner tranqu gateway all help --help" -- "$cur") )
+          return 0
+          ;;
+        device-status)
+          COMPREPLY=( $(compgen -W "show active inactive maintenance help --help" -- "$cur") )
+          return 0
+          ;;
+        *)
+          COMPREPLY=( $(compgen -W "install uninstall update prune start stop status device-status info help --help" -- "$cur") )
+          return 0
+          ;;
+      esac
+      ;;
+    init)
+      COMPREPLY=( $(compgen -W "--template backend cloud help --help" -- "$cur") )
+      return 0
+      ;;
+    completion)
+      COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") )
+      return 0
+      ;;
+    *)
+      COMPREPLY=( $(compgen -W "init backend completion version help --help --version" -- "$cur") )
+      return 0
+      ;;
+  esac
+}
+complete -F _oqtopus oqtopus
+EOF
+}
+
+completion_zsh() {
+  cat <<'EOF'
+#compdef oqtopus
+
+_oqtopus() {
+  local -a commands backend_commands install_components update_components services device_status shells templates
+  commands=(init backend completion version help --help --version)
+  backend_commands=(install uninstall update prune start stop status device-status info help --help)
+  install_components=(engine tranqu gateway all help --help)
+  update_components=(engine tranqu gateway help --help)
+  services=(core sse_engine mitigator estimator combiner tranqu gateway all help --help)
+  device_status=(show active inactive maintenance help --help)
+  shells=(bash zsh fish)
+  templates=(backend cloud)
+
+  case $words[2] in
+    backend)
+      case $words[3] in
+        install) compadd -- $install_components ;;
+        update|uninstall) compadd -- $update_components ;;
+        start|stop) compadd -- $services ;;
+        device-status) compadd -- $device_status ;;
+        *) compadd -- $backend_commands ;;
+      esac
+      ;;
+    init) compadd -- --template help --help $templates ;;
+    completion) compadd -- $shells ;;
+    *) compadd -- $commands ;;
+  esac
+}
+
+_oqtopus "$@"
+EOF
+}
+
+completion_fish() {
+  cat <<'EOF'
+complete -c oqtopus -f -n "__fish_use_subcommand" -a "init backend completion version help --help --version"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from init" -a "--template backend cloud help --help"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from backend" -a "install uninstall update prune start stop status device-status info help --help"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from install" -a "engine tranqu gateway all help --help"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from update uninstall" -a "engine tranqu gateway help --help"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from start stop" -a "core sse_engine mitigator estimator combiner tranqu gateway all help --help"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from device-status" -a "show active inactive maintenance help --help"
+EOF
+}
+
+cmd_completion() {
+  if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+    usage_completion
+    return
+  fi
+  [[ $# -eq 1 ]] || { usage_completion; exit 1; }
+  case "$1" in
+    bash) completion_bash ;;
+    zsh) completion_zsh ;;
+    fish) completion_fish ;;
+    *) die "unsupported shell: $1" ;;
+  esac
+}
+
+main() {
+  case "${1:-}" in
+    help|--help|"")
+      usage_top
+      ;;
+    version|--version)
+      printf 'oqtopus %s\n' "$CLI_VERSION"
+      ;;
+    init)
+      shift
+      cmd_init "$@"
+      ;;
+    backend)
+      shift
+      cmd_backend "$@"
+      ;;
+    completion)
+      shift
+      cmd_completion "$@"
+      ;;
+    *)
+      die "unknown command: $1"
+      ;;
+  esac
+}
+
+main "$@"
