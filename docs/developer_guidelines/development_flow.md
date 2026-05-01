@@ -83,15 +83,15 @@ When a pull request is opened, labels are automatically assigned based on the co
 Below is the correspondence between prefixes and labels:
 
 | Prefix | Label | Description |
-|---|---|---|
-|feat: | `feature` | Adding a new feature |
-|fix: | `bugfix` | Bug fixes |
-|docs: | `documentation` | Documentation only changes |
-|style: | `style` | Changes that do not affect the meaning of the code (white-space, formatting, missing semi-colons, etc) |
-|refactor: | `refactor` | Code changes that neither fix a bug nor add a feature |
-|test: | `test` | Adding or correcting existing tests |
-|ci: | `ci` | Adding or updating CI configuration and scripts |
-|chore: | `chore` | Minor changes or maintenance tasks |
+| --- | --- | --- |
+| feat: | `feature` | Adding a new feature |
+| fix: | `bugfix` | Bug fixes |
+| docs: | `documentation` | Documentation only changes |
+| style: | `style` | Changes that do not affect the meaning of the code (white-space, formatting, missing semi-colons, etc) |
+| refactor: | `refactor` | Code changes that neither fix a bug nor add a feature |
+| test: | `test` | Adding or correcting existing tests |
+| ci: | `ci` | Adding or updating CI configuration and scripts |
+| chore: | `chore` | Minor changes or maintenance tasks |
 
 ## CI
 
