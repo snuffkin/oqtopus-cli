@@ -24,6 +24,10 @@ The installable components are not the same as the process targets used by
 it provides multiple managed services such as `core`, `sse_engine`,
 `mitigator`, `estimator`, and `combiner`.
 
+The `engine` repository is a monorepo. During `engine` installation, OQTOPUS
+CLI synchronizes the uv environments for the `core`, `combiner`, `estimator`,
+and `mitigator` subprojects. `sse_engine` uses the installed `core` project.
+
 ## List Available Versions
 
 ```bash
@@ -34,9 +38,9 @@ This lists stable versions available for a component:
 
 ```text
 engine:
-  v1.3.0
-  v1.2.1
-  v1.2.0
+* v2.0.3 (installed)
+  v2.0.2 (installed)
+  v2.0.1
 ```
 
 The command reads remote GitHub tags and shows stable semantic version tags in
@@ -44,6 +48,16 @@ The command reads remote GitHub tags and shows stable semantic version tags in
 
 You can run this command from any directory. It does not require a backend
 environment.
+
+When you run it from a backend environment, the list also shows local state:
+
+- `*` marks the version selected by the current environment's `.metadata`.
+- `(installed)` marks a release directory already available under
+  `install_root`.
+
+This helps you choose an `uninstall` target without checking the installation
+directory manually. If a local version is not present in remote stable tags, it
+is still shown and marked as `not in remote tags`.
 
 ## Install All Components
 
@@ -88,6 +102,14 @@ The same form applies to `tranqu` and `gateway`.
 Installing `engine` also builds the `sse_runtime` Docker image from the
 installed engine release.
 
+Because `engine` is a monorepo, installing it also prepares the uv environments
+for the engine service subprojects:
+
+- `core`
+- `combiner`
+- `estimator`
+- `mitigator`
+
 Docker must be available when running:
 
 ```bash
@@ -100,9 +122,12 @@ or:
 oqtopus backend install all
 ```
 
-If Docker is unavailable, required `config/.env` values are missing, or the
-Docker build fails, the engine install fails and the `engine_version` binding is
-not updated.
+The Docker build uses `SSE_CONTAINER_IMAGE` from `config/.env`. The build
+arguments `UID` and `GID` are set automatically from the current user with
+`id -u` and `id -g`; they do not need to be written in `config/.env`.
+
+If Docker is unavailable, `SSE_CONTAINER_IMAGE` is missing, or the Docker build
+fails, the engine install fails and the `engine_version` binding is not updated.
 
 ## Update One Component
 
@@ -119,28 +144,16 @@ component and updating the environment binding.
 oqtopus backend uninstall engine v1.2.3
 ```
 
-The CLI refuses to uninstall a version that is still referenced by a registered
-environment.
+This removes the selected local release directory from `install_root`.
 
-## Prune Unused Releases
-
-```bash
-oqtopus backend prune
-```
-
-`prune` lists unreferenced installed releases and asks for confirmation before
-deleting them.
-
-To skip the confirmation prompt:
-
-```bash
-oqtopus backend prune --yes
-```
+The CLI does not check whether the version is used by the current environment
+or another backend environment. If an environment still references a removed
+version, install that version again or update the environment to another
+version before starting services.
 
 ## Configuration Files
 
-`install`, `update`, `uninstall`, and `prune` do not modify files under
-`config/`.
+`install`, `update`, and `uninstall` do not modify files under `config/`.
 
 If a component version requires configuration changes, update the configuration
 files manually.

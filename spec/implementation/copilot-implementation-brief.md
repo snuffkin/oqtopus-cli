@@ -84,7 +84,7 @@ Required behavior:
    - `pids/`
    - `sse_work/`
 3. Resolve `install_root`.
-4. Write absolute `env_root` and `install_root` to `.metadata`.
+4. Write `install_root`, `env_name`, and absolute `env_root` to `.metadata`.
 5. Register the environment path in the central registry.
 6. Do not create a per-environment CLI binary.
    The `oqtopus` executable is expected to be installed in a directory on
@@ -100,6 +100,16 @@ Required behavior:
    - `logs/combiner/`
    - `logs/tranqu/`
    - `logs/gateway/`
+
+Before creating the environment directory, validate `env_name` with:
+
+```text
+^[a-z0-9][a-z0-9_.-]*$
+```
+
+The name must be Docker-safe because it is used to render Docker-related
+configuration values. After downloading the template, replace `{{ env_name }}`
+placeholders in `<env_name>/config/.env` with the validated environment name.
 
 Only the `backend` template is required for the PoC.
 The `cloud` template should return a clear "not implemented" error.
@@ -228,12 +238,8 @@ Resolve `install_root` as:
 
 ### Config Directory
 
-Resolve the registry path as:
-
-1. `$XDG_CONFIG_HOME/oqtopus/backend/environments.json` if `XDG_CONFIG_HOME` is set.
-2. Otherwise `~/.config/oqtopus/backend/environments.json`.
-
-The registry file contains a JSON array of absolute backend environment paths.
+Do not maintain a central backend environment registry.
+The CLI must not create or update `environments.json`.
 
 ## Metadata Format
 
@@ -245,6 +251,7 @@ Required fields:
 ```text
 template=backend
 install_root=<absolute path>
+env_name=<env_name>
 env_root=<absolute path>
 created_at=<ISO-8601 datetime>
 ```
@@ -278,12 +285,20 @@ Required behavior:
 4. Queries the component repository tags API with `?per_page=100`.
 5. Includes only stable semantic version tags in `vX.Y.Z` format.
 6. Sorts versions by semantic version descending.
-7. Prints:
+7. If the current directory is a valid backend environment, reads `.metadata`
+   and `install_root` as optional context.
+8. In a valid backend environment, marks the current version with `*`.
+9. In a valid backend environment, marks locally available release directories
+   with `(installed)`.
+10. Includes current or locally installed versions even if they are not present
+    in remote stable tags, and marks them with `(not in remote tags)`.
+11. Prints:
 
 ```text
 engine:
-  v1.3.0
-  v1.2.1
+* v2.0.3 (installed)
+  v2.0.2 (installed)
+  v2.0.1
 ```
 
 If no stable versions are found, exit non-zero with a clear error.
@@ -308,11 +323,25 @@ Required behavior:
 2. Create `<install_root>/<component>-<version>/`.
 3. Download the release archive.
 4. Extract it into the target directory with the top-level archive directory removed.
-5. Run:
+5. Run `uv sync`.
+
+For `tranqu` and `gateway`:
 
 ```bash
 uv sync --frozen --no-dev --project <install_root>/<component>-<version>/
 ```
+
+For `engine`, the repository is a monorepo. Run `uv sync --frozen --no-dev` for
+each engine service project:
+
+```bash
+uv sync --frozen --no-dev --project <install_root>/engine-<version>/core
+uv sync --frozen --no-dev --project <install_root>/engine-<version>/combiner
+uv sync --frozen --no-dev --project <install_root>/engine-<version>/estimator
+uv sync --frozen --no-dev --project <install_root>/engine-<version>/mitigator
+```
+
+`sse_engine` is launched from the `core` project.
 
 6. If the component is `engine`, build the `sse_runtime` Docker image from:
 
@@ -320,19 +349,21 @@ uv sync --frozen --no-dev --project <install_root>/<component>-<version>/
 <install_root>/engine-<version>/sse_runtime/Dockerfile
 ```
 
-Load `SSE_CONTAINER_IMAGE`, `UID`, and `GID` from `<env_root>/config/.env`.
+Load `SSE_CONTAINER_IMAGE` from `<env_root>/config/.env`. Use the current
+user's UID and GID from `id -u` and `id -g` for Docker build arguments.
 Run the equivalent of:
 
 ```bash
 docker build <install_root>/engine-<version>/sse_runtime \
   -t <SSE_CONTAINER_IMAGE> \
-  --build-arg UID=<UID> \
-  --build-arg GID=<GID>
+  --build-arg UID=$(id -u) \
+  --build-arg GID=$(id -g)
 ```
 
-If Docker is unavailable, the Dockerfile is missing, required variables are
-missing from `config/.env`, or the build fails, `oqtopus backend install engine`
-must fail and must not update `engine_version`.
+If Docker is unavailable, `id` is unavailable, the Dockerfile is missing,
+`SSE_CONTAINER_IMAGE` is missing from `config/.env`, or the build fails,
+`oqtopus backend install engine` must fail and must not update
+`engine_version`.
 
 7. Update the component version binding in `.metadata`.
 
@@ -380,8 +411,10 @@ missing from `.metadata`, or the installed release directory is missing, `start`
 MUST fail with a clear error.
 
 `core`, `sse_engine`, `mitigator`, `estimator`, and `combiner` are launched from
-the installed `engine` release. `gateway` is managed as a Python/uv component in
-the same style as `engine` and `tranqu`.
+the installed `engine` release. Because `engine` is a monorepo, `core` and
+`sse_engine` use the installed `core` uv project, while `mitigator`,
+`estimator`, and `combiner` use their matching uv projects. `gateway` is
+managed as a Python/uv component in the same style as `tranqu`.
 
 `oqtopus backend start all` starts all managed services in this order:
 
@@ -511,37 +544,23 @@ oqtopus backend info
 Print:
 
 1. Environment metadata.
-2. Installed releases grouped by component.
+2. Component version bindings recorded in `.metadata`.
 3. Expanded paths recorded in `.metadata`.
 
 Do not print Python executable or Python version information. Managed services
 run through component-specific `uv` environments, so a single process-level
 Python path would be misleading.
 
-## Prune Behavior
-
-Command:
-
-```bash
-oqtopus backend prune
-```
-
-Required behavior:
-
-1. Load the registry.
-2. Remove registry entries whose environment directory or `.metadata` no longer exists.
-3. Collect active component bindings from remaining environments.
-4. List directories under `install_root`.
-5. Delete installed release directories that are not referenced by any active environment.
-
-For safety, the PoC should print each deletion.
+Do not print installed release directories. `.metadata` is the source of truth
+for the versions selected by the current environment.
 
 ## Decided Implementation Questions
 
 - `oqtopus backend install` updates `.metadata` automatically.
-- `oqtopus backend uninstall` refuses to remove a version referenced by any
-  registered environment.
-- `oqtopus backend prune --yes` skips the confirmation prompt.
+- `oqtopus backend uninstall` removes the selected release directory without
+  checking whether another environment references it.
+- `oqtopus backend prune` is not provided in v1.0.0.
+- The CLI does not maintain `environments.json`.
 - Placeholder processes are development/test-only, not default v1.0.0 behavior.
 - `oqtopus init` downloads templates from GitHub for v1.0.0.
 - `gateway` is managed as a Python/uv component for v1.0.0.

@@ -45,3 +45,18 @@ See [Shell Completion](./shell-completion.md) for manual setup.
 OQTOPUS CLI v1.0.0 supports Linux and macOS.
 
 Windows is not supported yet.
+
+## Prerequisites
+
+Install Docker before installing the `engine` backend component. OQTOPUS CLI
+builds the `sse_runtime` Docker image during:
+
+```bash
+oqtopus backend install engine
+```
+
+and:
+
+```bash
+oqtopus backend install all
+```

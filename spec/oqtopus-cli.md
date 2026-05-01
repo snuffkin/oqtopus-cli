@@ -70,6 +70,7 @@ relative to `env_root`.
 ```text
 template=backend
 install_root=<absolute path to the backend releases directory>
+env_name=<environment directory name>
 env_root=<absolute path to this environment>
 created_at=<ISO datetime>
 ```
@@ -97,16 +98,34 @@ oqtopus init <env_name> --template <template>
 
 ### 4.2 Backend template behavior
 
+`env_name` MUST be Docker-safe because it is used to derive Docker-related
+configuration values such as `SSE_CONTAINER_IMAGE` and
+`SSE_CONTAINER_NETWORK`.
+
+Allowed `env_name` pattern:
+
+```text
+^[a-z0-9][a-z0-9_.-]*$
+```
+
+If `env_name` does not match this pattern, `oqtopus init` MUST fail before
+creating the environment directory.
+
 1. Creates the env directory.
 2. Downloads the backend template from the official GitHub repository.
 3. Copies the contents of `templates/backend/` into the root of the new environment directory.
 4. Generates `.metadata` dynamically for the new environment.
-5. Resolves the `install_root` path (respecting $XDG_DATA_HOME) and writes it to `.metadata`.
-6. Does not place a per-environment CLI binary in the created directory.
+5. Resolves the `install_root` path (respecting $XDG_DATA_HOME) and writes it
+   to `.metadata`.
+6. Writes `env_name=<env_name>` to `.metadata` between `install_root` and
+   `env_root`.
+7. Replaces `{{ env_name }}` placeholders in `<env_name>/config/.env` with the
+   validated `env_name`.
+8. Does not place a per-environment CLI binary in the created directory.
    The `oqtopus` executable is expected to already be installed in a location
    on the user's `PATH`.
-7. Does **NOT** install backend components.
-8. Creates runtime directories dynamically. These are not copied from the
+9. Does **NOT** install backend components.
+10. Creates runtime directories dynamically. These are not copied from the
    template repository:
    - `pids/`
    - `sse_work/`
@@ -152,6 +171,8 @@ templates/backend/config/
 
 `templates/backend/config/.env` is distributed as the initial environment
 variable file for launched backend processes. It MUST NOT contain secrets.
+The template may contain `{{ env_name }}` placeholders. `oqtopus init` replaces
+those placeholders in `config/.env` with the validated environment name.
 
 Runtime-only empty directories such as `pids/`, `logs/<component>/`, and
 `sse_work/` are created by `oqtopus init`. They are not represented as template
@@ -197,9 +218,9 @@ Suggested output:
 oqtopus v1.0.0
 ```
 
-`oqtopus backend info` remains the command for backend environment details such
-as installed component releases, metadata bindings, Python information, and
-expanded paths. `oqtopus version` is only for the CLI version.
+`oqtopus backend info` remains the command for backend environment metadata
+such as component version bindings and expanded paths. `oqtopus version` is
+only for the CLI version.
 
 ### 5.3 Shell completion behavior
 
@@ -331,12 +352,26 @@ Each installed version is fully self-contained with its own `.venv`.
 
 ## 8. Backend Installation Using `uv sync`
 
-After extracting a release archive, the CLI MUST perform:
-Executed inside the release directory:
+After extracting a release archive, the CLI MUST synchronize the component's
+Python environment with `uv`.
+
+For `tranqu` and `gateway`, the CLI MUST perform:
 
 ```bash
 uv sync --frozen --no-dev --project <install_root>/<component>-<version>/
 ```
+
+For `engine`, the release is a monorepo. The CLI MUST run `uv sync` for each
+engine service project:
+
+```bash
+uv sync --frozen --no-dev --project <install_root>/engine-<version>/core
+uv sync --frozen --no-dev --project <install_root>/engine-<version>/combiner
+uv sync --frozen --no-dev --project <install_root>/engine-<version>/estimator
+uv sync --frozen --no-dev --project <install_root>/engine-<version>/mitigator
+```
+
+`sse_engine` is launched from the `core` engine project.
 
 Behavior:
 
@@ -406,7 +441,9 @@ Execution Flow:
 
 4. Environment Synchronization:
 
-   - Executes `uv sync --frozen --no-dev --project <install_root>/<component>-<version>/` inside the target directory.
+   - For `tranqu` and `gateway`, executes `uv sync --frozen --no-dev --project <install_root>/<component>-<version>/` inside the target directory.
+   - For `engine`, executes `uv sync --frozen --no-dev` for the `core`,
+     `combiner`, `estimator`, and `mitigator` subprojects.
    - This ensures a deterministic, production-ready `.venv` is created using the Python version specified in the component's `pyproject.toml`.
 
 5. SSE Runtime Docker Image Build:
@@ -419,22 +456,23 @@ Execution Flow:
       <install_root>/engine-<version>/sse_runtime/Dockerfile
       ```
 
-   - The CLI MUST load `SSE_CONTAINER_IMAGE`, `UID`, and `GID` from
-     `<env_root>/config/.env`.
+   - The CLI MUST load `SSE_CONTAINER_IMAGE` from `<env_root>/config/.env`.
+   - The CLI MUST use the current user's UID and GID from `id -u` and `id -g`
+     for the Docker build arguments.
    - The build command is equivalent to:
 
       ```bash
       docker build <install_root>/engine-<version>/sse_runtime \
           -t <SSE_CONTAINER_IMAGE> \
-          --build-arg UID=<UID> \
-          --build-arg GID=<GID>
+          --build-arg UID=$(id -u) \
+          --build-arg GID=$(id -g)
       ```
 
    - This is based on the existing backend setup `build-sse_runtime` behavior.
-   - If Docker is not available, the Dockerfile is missing, required variables
-     are missing from `config/.env`, or the Docker build fails, `oqtopus
-     backend install engine` MUST fail and MUST NOT update the `engine_version`
-     binding.
+   - If Docker is not available, `id` is not available, the Dockerfile is
+     missing, `SSE_CONTAINER_IMAGE` is missing from `config/.env`, or the
+     Docker build fails, `oqtopus backend install engine` MUST fail and MUST
+     NOT update the `engine_version` binding.
    - Installing `tranqu` or `gateway` does not build `sse_runtime`.
 
 6. Metadata Binding Update:
@@ -474,8 +512,6 @@ Execution Flow:
      metadata bindings; rollback is not performed automatically.
    - The failed component MUST NOT update its metadata binding.
 
-### 9.2 uninstall
-
 ### 9.2 versions
 
 ```bash
@@ -486,11 +522,18 @@ Lists available stable versions for the specified backend component.
 
 The command:
 
-- does not require backend environment validation;
+- does not require backend environment validation and can run outside a
+  backend environment;
 - queries the same GitHub tags API used by latest-version resolution;
 - includes only stable semantic version tags in `vX.Y.Z` format;
 - excludes pre-release tags such as `v1.0.0-rc1`;
 - sorts versions by semantic version in descending order;
+- when run from a valid backend environment, marks the current version from
+  `.metadata` with `*`;
+- when run from a valid backend environment, marks locally available release
+  directories under `install_root` with `(installed)`;
+- when a current or locally installed version is not present in remote stable
+  tags, still includes it and marks it with `(not in remote tags)`;
 - does not support `all`;
 - does not complete version strings.
 
@@ -498,9 +541,9 @@ Example:
 
 ```text
 engine:
-  v1.3.0
-  v1.2.1
-  v1.2.0
+* v2.0.3 (installed)
+  v2.0.2 (installed)
+  v2.0.1
 ```
 
 If the GitHub tags API response contains 100 tags, the CLI SHOULD print:
@@ -524,10 +567,12 @@ oqtopus backend uninstall <component> <version>
 ```
 
 - Removes the release directory for the specified version.
-- If the specified version is currently referenced by any registered
-  environment, the command MUST fail and MUST NOT delete the directory.
-- `uninstall` does not rewrite `.metadata`; it only operates on versions that
-  are not currently referenced.
+- Does not check whether the specified version is referenced by the current
+  environment or by any other environment.
+- `uninstall` does not rewrite `.metadata`.
+- If an environment still references a removed version, later commands such as
+  `start` MUST fail with a clear "installed release directory not found" error
+  until the version is installed again or the environment binding is updated.
 
 ### 9.4 update
 
@@ -538,28 +583,7 @@ oqtopus backend update <component>
 - Equivalent to `oqtopus backend install <component> <latest>`.
 - Performs no special processing beyond install plus metadata update.
 
-### 9.5 prune
-
-```bash
-oqtopus backend prune
-```
-
-- Lists unreferenced directories under `<install_root>` that will be deleted.
-- Prompts for confirmation before deleting them.
-- `oqtopus backend prune --yes` skips the confirmation prompt.
-- Retains versions referenced by any `.metadata`.
-
-Suggested interactive prompt:
-
-```text
-The following installed releases will be deleted (2):
-  - /home/user/.local/share/oqtopus/backend/releases/engine-v1.2.0
-  - /home/user/.local/share/oqtopus/backend/releases/tranqu-v1.4.1
-
-Proceed? [y/N]:
-```
-
-### 9.6 start
+### 9.5 start
 
 Starts backend processes.
 
@@ -594,7 +618,7 @@ Expected behavior:
    - For `core`:
 
       ```bash
-      uv run --project <install_root>/engine-<version> python -m oqtopus_engine_core.app \
+      uv run --project <install_root>/engine-<version>/core python -m oqtopus_engine_core.app \
           -c <env_root>/config/core/config.yaml \
           -l <env_root>/config/core/logging.yaml
       ```
@@ -602,7 +626,7 @@ Expected behavior:
    - For `sse_engine`:
 
       ```bash
-      uv run --project <install_root>/engine-<version> python -m oqtopus_engine_core.app \
+      uv run --project <install_root>/engine-<version>/core python -m oqtopus_engine_core.app \
           -c <env_root>/config/sse_engine/config.yaml \
           -l <env_root>/config/sse_engine/logging.yaml
       ```
@@ -610,7 +634,7 @@ Expected behavior:
    - For `mitigator`:
 
       ```bash
-      uv run --project <install_root>/engine-<version> python -m oqtopus_engine_mitigator.app \
+      uv run --project <install_root>/engine-<version>/mitigator python -m oqtopus_engine_mitigator.app \
           -c <env_root>/config/mitigator/config.yaml \
           -l <env_root>/config/mitigator/logging.yaml
       ```
@@ -618,7 +642,7 @@ Expected behavior:
    - For `estimator`:
 
       ```bash
-      uv run --project <install_root>/engine-<version> python -m oqtopus_engine_estimator.app \
+      uv run --project <install_root>/engine-<version>/estimator python -m oqtopus_engine_estimator.app \
           -c <env_root>/config/estimator/config.yaml \
           -l <env_root>/config/estimator/logging.yaml
       ```
@@ -626,7 +650,7 @@ Expected behavior:
    - For `combiner`:
 
       ```bash
-      uv run --project <install_root>/engine-<version> python -m oqtopus_engine_combiner.app \
+      uv run --project <install_root>/engine-<version>/combiner python -m oqtopus_engine_combiner.app \
           -c <env_root>/config/combiner/config.yaml \
           -l <env_root>/config/combiner/logging.yaml
       ```
@@ -677,7 +701,7 @@ Expected behavior:
      exit status. Services already started by the same command are left running;
      rollback is not performed automatically.
 
-### 9.7 stop
+### 9.6 stop
 
 ```bash
 oqtopus backend stop <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
@@ -716,7 +740,7 @@ For `oqtopus backend stop all`:
 - If stopping any service fails, the command MUST continue attempting to stop
   the remaining services and exit non-zero after reporting the failure.
 
-### 9.8 restart
+### 9.7 restart
 
 ```bash
 oqtopus backend restart <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
@@ -740,7 +764,7 @@ For `oqtopus backend restart all`:
 - If all stop operations succeed, the CLI starts all managed services using
   the same order and behavior as `oqtopus backend start all`.
 
-### 9.9 status
+### 9.8 status
 
 ```bash
 oqtopus backend status
@@ -761,7 +785,7 @@ gateway: Stopped
 If a PID file exists but the process is not alive, the component is treated as
 stopped.
 
-### 9.10 device-status
+### 9.9 device-status
 
 ```bash
 oqtopus backend device-status show
@@ -812,7 +836,7 @@ Expected behavior:
      require `gateway` to be running.
    - The command does not call scripts from the installed `gateway` release.
 
-### 9.11 info
+### 9.10 info
 
 ```bash
 oqtopus backend info
@@ -820,57 +844,40 @@ oqtopus backend info
 
 Prints:
 
-1. Installed backend releases for each component
-2. `.metadata` version bindings
-3. Expanded paths recorded in `.metadata`
+1. `.metadata` version bindings
+2. Expanded paths recorded in `.metadata`
 
 `backend info` does not print Python executable or Python version information.
 Managed services run through their component-specific `uv` environments, so a
 single process-level Python path would be misleading.
 
+`backend info` also does not print installed release directories. The source of
+truth for the environment's selected component versions is `.metadata`.
+
 #### Example
 
 ```text
-=== Environment (.metadata) ===
+=== Backend Info (.metadata) ===
 template=backend
 install_root=/home/user/.local/share/oqtopus/backend/releases
+env_name=myenv
 env_root=/home/user/myenv
 created_at=2026-05-01T00:00:00Z
 engine_version=v2.1.0
 tranqu_version=v0.3.3
 gateway_version=v0.2.5
-
-=== Installed Backend Releases ===
-engine: v0.3.3 v0.3.2
-tranqu: v0.1.4
-gateway: v0.2.5
 ```
 
-## 10. Environment Registry (for prune operation)
+## 10. Environment Registry
 
-To ensure that the `prune` command can identify all active environments without performing a full-disk scan, the CLI maintains a central registry of environment paths.
+The CLI MUST NOT maintain a central backend environment registry.
 
-### 10.1 Registry File
-
-- Path:
-  - `$XDG_CONFIG_HOME/oqtopus/backend/environments.json` if `XDG_CONFIG_HOME` is set
-  - Otherwise `~/.config/oqtopus/backend/environments.json`
-- Format: A JSON file containing an array of absolute directory paths to active backend environments.
-
-### 10.2 Registration Logic
-
-- `oqtopus init`: Whenever a new environment is created with the `backend` template, its absolute path MUST be appended to this registry file.
-- Automatic Detection: When any `oqtopus backend` command is executed within a directory, the CLI SHOULD verify if the current path is in the registry and add it if missing.
-
-### 10.3 Prune Workflow
-
-1. Load Registry: The CLI reads all paths from the `environments.json`.
-2. Scan Environments: For each registered path:
-   - Check if the directory and `.metadata` file still exist.
-   - If they are missing, the path is removed from the registry (Self-healing).
-   - If they exist, the CLI parses `.metadata` to collect all currently bound version strings (e.g., `engine_version`, `tranqu_version`, `gateway_version`).
-3. Identify Garbage: The CLI lists all versioned directories in the `install_root`.
-4. Deletion: Any directory in `install_root` that is NOT referenced by any active environment in the registry is safely deleted.
+- No `environments.json` file is created or updated.
+- Each backend environment's `.metadata` is the source of truth for that
+  environment only.
+- The CLI does not scan or track other environments before deleting installed
+  releases.
+- `prune` is not provided in v1.0.0.
 
 ## 11. Template Retrieval
 
@@ -903,6 +910,8 @@ Templates are stored in the `templates/` directory of the official repository:
 - May rely on common POSIX utilities plus `bash`, `curl`, `tar`, `jq`, and `uv`.
 - `docker` is required when running `oqtopus backend install engine`, because
   the `sse_runtime` image is built during engine installation.
+- `env_name` is used in Docker-related configuration values, so it must match
+  `^[a-z0-9][a-z0-9_.-]*$`.
 - No Windows support for v1.0.0.
 
 ### 12.2 Future Rust implementation

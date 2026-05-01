@@ -35,6 +35,38 @@ persisted to your global shell environment.
 
 `config/.env` is a configuration file and should not contain secrets.
 
+## Environment Name Placeholders
+
+The backend template may use `{{ env_name }}` in `config/.env`.
+
+When you run:
+
+```bash
+oqtopus init my-demo --template backend
+```
+
+OQTOPUS CLI replaces the placeholder with the validated environment name.
+
+For example:
+
+```env
+SSE_CONTAINER_IMAGE="{{ env_name }}-sse_runtime:latest"
+SSE_CONTAINER_NETWORK="{{ env_name }}_context_app_net"
+```
+
+becomes:
+
+```env
+SSE_CONTAINER_IMAGE="my-demo-sse_runtime:latest"
+SSE_CONTAINER_NETWORK="my-demo_context_app_net"
+```
+
+These values are used by Docker, so `env_name` must be Docker-safe:
+
+```text
+^[a-z0-9][a-z0-9_.-]*$
+```
+
 ## Service Configuration
 
 Each service has its own configuration directory under `config/`.

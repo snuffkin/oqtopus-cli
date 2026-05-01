@@ -28,8 +28,8 @@ Creates a local backend environment.
 oqtopus backend info
 ```
 
-Prints backend environment information, metadata bindings, installed releases,
-Python information, and expanded paths.
+Prints backend environment metadata, including component version bindings and
+expanded paths.
 
 ## Component Management
 
@@ -39,15 +39,18 @@ oqtopus backend install <engine|tranqu|gateway> [version]
 oqtopus backend install all
 oqtopus backend update <engine|tranqu|gateway>
 oqtopus backend uninstall <engine|tranqu|gateway> <version>
-oqtopus backend prune
-oqtopus backend prune --yes
 ```
 
 `install all` installs the latest stable `engine`, `tranqu`, and `gateway`
 releases independently.
 
 `versions` lists available stable versions from remote GitHub tags and does not
-require a backend environment.
+require a backend environment. When run inside a backend environment, it also
+marks the current `.metadata` binding with `*` and locally available release
+directories with `(installed)`.
+
+`uninstall` removes the selected local release directory without checking
+whether another backend environment still references it.
 
 ## Service Lifecycle
 

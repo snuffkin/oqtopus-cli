@@ -19,6 +19,10 @@ installed release:
 - `estimator`
 - `combiner`
 
+`core` and `sse_engine` run from the installed `engine` `core` uv project.
+`mitigator`, `estimator`, and `combiner` run from their matching engine uv
+projects.
+
 `tranqu` and `gateway` are installed as their own components and are also
 managed as service targets:
 

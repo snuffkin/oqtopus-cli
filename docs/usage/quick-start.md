@@ -14,6 +14,10 @@ cd my-backend
 configuration examples, log directories, PID storage, and the `sse_work`
 directory.
 
+The environment name is also used to generate Docker-related configuration
+values such as Docker image and network names. Use a Docker-safe name with
+lowercase letters, digits, `.`, `_`, or `-`.
+
 Backend code is not installed during `init`.
 
 ## Install Backend Components

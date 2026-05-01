@@ -75,6 +75,12 @@ updates should continue to live under `spec/`.
 
 - `config/` contains configuration files for each microservice and
   environment variables used when launching backend processes.
+- `.metadata` contains `env_name=<env_name>` between `install_root` and
+  `env_root`.
+- `env_name` must match `^[a-z0-9][a-z0-9_.-]*$` because it is used in
+  Docker-related configuration values.
+- `oqtopus init` replaces `{{ env_name }}` placeholders in `config/.env` with
+  the validated environment name.
 - `config/.env` contains environment variables for launched backend processes.
 - `logs/` contains one initially empty subdirectory for each managed service,
   using `logs/<component>/`.
@@ -101,6 +107,9 @@ The backend components currently in scope are:
   versions for a component.
 - `versions` uses GitHub tags, includes only `vX.Y.Z`, sorts by semantic
   version descending, and does not support `all`.
+- When `versions` is run from a valid backend environment, it also marks the
+  current `.metadata` binding with `*` and locally available release
+  directories with `(installed)`.
 - `oqtopus backend install all` installs `engine`, `tranqu`, and `gateway`.
 - `install all` resolves the latest stable version independently for each
   component.
@@ -116,22 +125,29 @@ The backend components currently in scope are:
 - Latest version resolution uses the GitHub tags API and selects the newest
   stable semantic version tag in `vX.Y.Z` format.
 - If the target release directory already exists and contains `.venv`, it is
-  reused.
+  reused. For `engine`, the install is considered reusable only when the
+  required service subprojects have `.venv` directories.
 - If the target release directory exists without `.venv`, it is treated as an
   incomplete installation and recreated.
 - A `--force` reinstall option is deferred to a future release.
 - Installing `engine` also builds the `sse_runtime` Docker image from
   `<install_root>/engine-<version>/sse_runtime/Dockerfile`.
-- The `sse_runtime` image build uses `SSE_CONTAINER_IMAGE`, `UID`, and `GID`
-  from `<env_root>/config/.env`.
+- Installing `engine` runs `uv sync --frozen --no-dev` for the monorepo
+  subprojects `core`, `combiner`, `estimator`, and `mitigator`.
+- `sse_engine` runs from the installed `engine` `core` project.
+- The `sse_runtime` image build uses `SSE_CONTAINER_IMAGE` from
+  `<env_root>/config/.env`.
+- The `sse_runtime` image build passes the current user's UID and GID from
+  `id -u` and `id -g` as Docker build arguments.
 - If Docker is unavailable, the Dockerfile is missing, required variables are
   missing, or the Docker build fails, `oqtopus backend install engine` fails
   without updating `engine_version`.
 
 ### Uninstall behavior
 
-- `oqtopus backend uninstall` must fail if the target version is referenced by
-  any registered environment.
+- `oqtopus backend uninstall` removes the target release directory without
+  checking whether the version is referenced by the current environment or
+  another environment.
 - `oqtopus backend uninstall` does not rewrite `.metadata`.
 
 ### Template retrieval
@@ -160,6 +176,8 @@ The backend components currently in scope are:
   `templates/backend/` at init time.
 - `templates/backend/config/.env` is distributed as the initial environment
   variable file and must not contain secrets.
+- `templates/backend/config/.env` may contain `{{ env_name }}` placeholders
+  that are rendered during `oqtopus init`.
 - Runtime-only empty directories such as `pids/`, `logs/<component>/`, and
   `sse_work/` are created by `oqtopus init`, not copied from `templates/`.
 - The expected `templates/backend/config/` tree is defined in
@@ -272,21 +290,18 @@ The backend components currently in scope are:
 - `update` does not perform special processing beyond install plus metadata
   update.
 
-### Prune safety
+### Prune
 
-- `oqtopus backend prune` requires confirmation before deletion.
-- The CLI should show the list of deletion targets before prompting.
-- The CLI may include the deletion target count in the prompt output.
-- `oqtopus backend prune --yes` skips the interactive confirmation.
-- PoC behavior and Rust behavior should match.
-- The interactive prompt should follow a conventional `Proceed? [y/N]:`
-  pattern.
+- `oqtopus backend prune` is not provided in v1.0.0.
+- The CLI does not maintain `environments.json`.
 
 ### Runtime model
 
 - All managed backend processes are run via `uv`.
 - `core`, `sse_engine`, `mitigator`, `estimator`, and `combiner` are launched
   from the installed `engine` release.
+- `core` and `sse_engine` use the `engine` `core` uv project; `mitigator`,
+  `estimator`, and `combiner` use their matching engine uv projects.
 - `core`, `sse_engine`, `mitigator`, `estimator`, and `combiner` are
   independent managed services.
 - `tranqu` is launched from the installed `tranqu` release.
