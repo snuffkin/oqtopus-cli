@@ -1,13 +1,13 @@
 # Starting And Stopping Services
 
-OQTOPUS CLI can start, stop, and inspect managed backend services from inside a
-backend environment.
+OQTOPUS CLI can start, stop, restart, and inspect managed backend services from
+inside a backend environment.
 
 ## Managed Services
 
-The managed services are process targets for `start`, `stop`, and `status`.
-They are different from the installable component targets used by `install`,
-`update`, and `uninstall`.
+The managed services are process targets for `start`, `stop`, `restart`, and
+`status`. They are different from the installable component targets used by
+`install`, `update`, and `uninstall`.
 
 The installable `engine` component is a set of backend microservices. After
 `engine` is installed, OQTOPUS CLI can manage these service targets from that
@@ -103,6 +103,26 @@ If no PID file exists, the service is treated as already stopped.
 
 `stop` sends `TERM` and waits up to 5 seconds. It does not send `KILL`
 automatically.
+
+## Restart Services
+
+Restart all managed services:
+
+```bash
+oqtopus backend restart all
+```
+
+Restart one service:
+
+```bash
+oqtopus backend restart gateway
+```
+
+For a single service, `restart` stops the service and starts it again. If
+`stop` fails, the service is not started again.
+
+For `restart all`, OQTOPUS CLI stops all services first. If every stop succeeds,
+it starts all services again using the normal start order.
 
 ## Process Output And Logs
 

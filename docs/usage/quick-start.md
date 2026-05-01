@@ -31,9 +31,15 @@ This installs the latest stable releases of:
 Each component resolves its own latest version independently.
 
 These are installable component targets. The `engine` component provides
-multiple managed services, so the service targets used by `start` and `stop`
-include `core`, `sse_engine`, `mitigator`, `estimator`, and `combiner` in
-addition to `tranqu` and `gateway`.
+multiple managed services, so the service targets used by `start`, `stop`, and
+`restart` include `core`, `sse_engine`, `mitigator`, `estimator`, and
+`combiner` in addition to `tranqu` and `gateway`.
+
+To see available versions before installing a specific component version, use:
+
+```bash
+oqtopus backend versions engine
+```
 
 ## Start Services
 

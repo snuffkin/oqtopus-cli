@@ -14,8 +14,8 @@ OQTOPUS CLI provides a single top-level command `oqtopus`:
   - Creates new local environments from templates.
 - `oqtopus backend`
   - Manages backend components: `engine`, `tranqu`, and `gateway`.
-  - Supports install / uninstall / update / prune.
-  - Starts and stops backend processes.
+  - Supports versions / install / uninstall / update / prune.
+  - Starts, stops, and restarts backend processes.
   - Validates environment integrity before executing commands.
 - `oqtopus completion`
   - Prints shell completion scripts for supported shells.
@@ -218,14 +218,15 @@ Completion MUST cover:
 - Top-level flags: `--help`, `--version`
 - `oqtopus init`: `--template`, `help`, `--help`
 - Template names: `backend`, `cloud`
-- `oqtopus backend`: `install`, `uninstall`, `update`, `prune`, `start`,
-  `stop`, `status`, `device-status`, `info`, `help`, `--help`
+- `oqtopus backend`: `install`, `versions`, `uninstall`, `update`, `prune`,
+  `start`, `stop`, `restart`, `status`, `device-status`, `info`, `help`,
+  `--help`
 - `oqtopus backend device-status`: `show`, `active`, `inactive`,
   `maintenance`, `help`, `--help`
 - Install components: `engine`, `tranqu`, `gateway`, `all`
-- Update/uninstall components: `engine`, `tranqu`, `gateway`
-- Start/stop components: `core`, `sse_engine`, `mitigator`, `estimator`,
-  `combiner`, `tranqu`, `gateway`, `all`
+- Versions/update/uninstall components: `engine`, `tranqu`, `gateway`
+- Start/stop/restart components: `core`, `sse_engine`, `mitigator`,
+  `estimator`, `combiner`, `tranqu`, `gateway`, `all`
 
 Version strings MUST NOT be completed in v1.0.0. Completion MUST NOT make
 network requests.
@@ -475,6 +476,49 @@ Execution Flow:
 
 ### 9.2 uninstall
 
+### 9.2 versions
+
+```bash
+oqtopus backend versions <engine|tranqu|gateway>
+```
+
+Lists available stable versions for the specified backend component.
+
+The command:
+
+- does not require backend environment validation;
+- queries the same GitHub tags API used by latest-version resolution;
+- includes only stable semantic version tags in `vX.Y.Z` format;
+- excludes pre-release tags such as `v1.0.0-rc1`;
+- sorts versions by semantic version in descending order;
+- does not support `all`;
+- does not complete version strings.
+
+Example:
+
+```text
+engine:
+  v1.3.0
+  v1.2.1
+  v1.2.0
+```
+
+If the GitHub tags API response contains 100 tags, the CLI SHOULD print:
+
+```text
+Warning: the GitHub tags API returned 100 tags.
+Additional tags may exist, so the version list may be incomplete.
+```
+
+If no stable semantic version tags are found, the command MUST fail with a
+clear error:
+
+```text
+Error: no stable versions found for engine.
+```
+
+### 9.3 uninstall
+
 ```bash
 oqtopus backend uninstall <component> <version>
 ```
@@ -485,7 +529,7 @@ oqtopus backend uninstall <component> <version>
 - `uninstall` does not rewrite `.metadata`; it only operates on versions that
   are not currently referenced.
 
-### 9.3 update
+### 9.4 update
 
 ```bash
 oqtopus backend update <component>
@@ -494,7 +538,7 @@ oqtopus backend update <component>
 - Equivalent to `oqtopus backend install <component> <latest>`.
 - Performs no special processing beyond install plus metadata update.
 
-### 9.4 prune
+### 9.5 prune
 
 ```bash
 oqtopus backend prune
@@ -515,7 +559,7 @@ The following installed releases will be deleted (2):
 Proceed? [y/N]:
 ```
 
-### 9.5 start
+### 9.6 start
 
 Starts backend processes.
 
@@ -633,7 +677,7 @@ Expected behavior:
      exit status. Services already started by the same command are left running;
      rollback is not performed automatically.
 
-### 9.6 stop
+### 9.7 stop
 
 ```bash
 oqtopus backend stop <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
@@ -672,7 +716,31 @@ For `oqtopus backend stop all`:
 - If stopping any service fails, the command MUST continue attempting to stop
   the remaining services and exit non-zero after reporting the failure.
 
-### 9.7 status
+### 9.8 restart
+
+```bash
+oqtopus backend restart <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+```
+
+Restarts managed backend services.
+
+For a single service, `restart` is equivalent to:
+
+1. `oqtopus backend stop <service>`
+2. `oqtopus backend start <service>`
+
+If `stop` fails, `restart` MUST fail and MUST NOT start the service.
+
+For `oqtopus backend restart all`:
+
+- The CLI first stops all managed services using the same order and behavior as
+  `oqtopus backend stop all`.
+- If any stop operation fails, the command exits non-zero and MUST NOT start
+  services again.
+- If all stop operations succeed, the CLI starts all managed services using
+  the same order and behavior as `oqtopus backend start all`.
+
+### 9.9 status
 
 ```bash
 oqtopus backend status
@@ -693,7 +761,7 @@ gateway: Stopped
 If a PID file exists but the process is not alive, the component is treated as
 stopped.
 
-### 9.8 device-status
+### 9.10 device-status
 
 ```bash
 oqtopus backend device-status show
@@ -744,7 +812,7 @@ Expected behavior:
      require `gateway` to be running.
    - The command does not call scripts from the installed `gateway` release.
 
-### 9.9 info
+### 9.11 info
 
 ```bash
 oqtopus backend info
@@ -754,25 +822,26 @@ Prints:
 
 1. Installed backend releases for each component
 2. `.metadata` version bindings
-3. Python environment info
-4. Expanded paths
+3. Expanded paths recorded in `.metadata`
+
+`backend info` does not print Python executable or Python version information.
+Managed services run through their component-specific `uv` environments, so a
+single process-level Python path would be misleading.
 
 #### Example
 
 ```text
 === Environment (.metadata) ===
-template = backend
-engine_version = v2.1.0
-tranqu_version = v0.3.3
-gateway_version = v0.2.5
-
-python_path = /usr/bin/python3
-python_version = 3.11.7
-
-install_root = /home/user/.local/share/oqtopus/backend/releases
+template=backend
+install_root=/home/user/.local/share/oqtopus/backend/releases
+env_root=/home/user/myenv
+created_at=2026-05-01T00:00:00Z
+engine_version=v2.1.0
+tranqu_version=v0.3.3
+gateway_version=v0.2.5
 
 === Installed Backend Releases ===
-engine: v0.3.3, v0.3.2
+engine: v0.3.3 v0.3.2
 tranqu: v0.1.4
 gateway: v0.2.5
 ```

@@ -34,6 +34,7 @@ Python information, and expanded paths.
 ## Component Management
 
 ```bash
+oqtopus backend versions <engine|tranqu|gateway>
 oqtopus backend install <engine|tranqu|gateway> [version]
 oqtopus backend install all
 oqtopus backend update <engine|tranqu|gateway>
@@ -45,16 +46,20 @@ oqtopus backend prune --yes
 `install all` installs the latest stable `engine`, `tranqu`, and `gateway`
 releases independently.
 
+`versions` lists available stable versions from remote GitHub tags and does not
+require a backend environment.
+
 ## Service Lifecycle
 
 ```bash
 oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
 oqtopus backend stop <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+oqtopus backend restart <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
 oqtopus backend status
 ```
 
-`start` and `stop` require an explicit target. Use `all` to operate on all
-managed services.
+`start`, `stop`, and `restart` require an explicit target. Use `all` to operate
+on all managed services.
 
 ## Device Status
 

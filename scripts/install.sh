@@ -12,6 +12,10 @@ log() {
   printf '%s\n' "$*"
 }
 
+progress() {
+  printf '%s\n' "$*" >&2
+}
+
 warn() {
   printf 'Warning: %s\n' "$*" >&2
 }
@@ -137,6 +141,7 @@ resolve_latest_version() {
   tags_url="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/tags?per_page=100"
   tags_file="$TMP_DIR/tags.json"
 
+  progress "Resolving latest OQTOPUS CLI version..."
   if ! curl -fsSL "$tags_url" -o "$tags_file"; then
     die "failed to query GitHub tags API: $tags_url"
   fi
@@ -149,7 +154,8 @@ download_archive() {
   archive_url="https://github.com/$REPO_OWNER/$REPO_NAME/archive/refs/tags/$VERSION.tar.gz"
   archive_path="$TMP_DIR/oqtopus-cli-$VERSION.tar.gz"
 
-  if ! curl -fL "$archive_url" -o "$archive_path"; then
+  progress "Installing OQTOPUS CLI $VERSION..."
+  if ! curl -fsSL "$archive_url" -o "$archive_path"; then
     die "failed to download archive for version '$VERSION'."
   fi
 

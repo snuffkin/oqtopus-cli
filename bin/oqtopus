@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-CLI_VERSION="${OQTOPUS_CLI_VERSION:-dev}"
+CLI_VERSION="${OQTOPUS_CLI_VERSION:-:wq}"
 CLI_REPO_OWNER="oqtopus-team"
 CLI_REPO_NAME="oqtopus-cli"
 TEMPLATE_BRANCH="main"
@@ -79,11 +79,13 @@ Usage:
 
 Commands:
   install         Install backend component releases.
+  versions        List available component versions.
   uninstall       Remove an unreferenced installed release.
   update          Install the latest release of a component.
   prune           Delete unreferenced installed releases.
   start           Start a managed service.
   stop            Stop a managed service.
+  restart         Restart a managed service.
   status          Show process status.
   device-status   Show or update gateway device status.
   info            Show backend environment information.
@@ -96,6 +98,13 @@ usage_backend_install() {
 Usage:
   oqtopus backend install <engine|tranqu|gateway> [version]
   oqtopus backend install all
+EOF
+}
+
+usage_backend_versions() {
+  cat <<'EOF'
+Usage:
+  oqtopus backend versions <engine|tranqu|gateway>
 EOF
 }
 
@@ -131,6 +140,13 @@ usage_backend_stop() {
   cat <<'EOF'
 Usage:
   oqtopus backend stop <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+EOF
+}
+
+usage_backend_restart() {
+  cat <<'EOF'
+Usage:
+  oqtopus backend restart <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
 EOF
 }
 
@@ -326,9 +342,31 @@ resolve_latest_version() {
     warn "the GitHub tags API returned 100 tags."
     warn "Additional tags may exist, so latest version resolution may be incomplete."
   fi
-  latest=$(jq -r '[.[].name as $tag | $tag | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | capture("^v(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)$") + {tag: $tag}] | sort_by(.major|tonumber, .minor|tonumber, .patch|tonumber) | last | .tag // empty' <<< "$tags_json")
+  latest=$(jq -r '[.[].name as $tag | $tag | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | capture("^v(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)$") | {tag: $tag, major: (.major | tonumber), minor: (.minor | tonumber), patch: (.patch | tonumber)}] | sort_by(.major, .minor, .patch) | last | .tag // empty' <<< "$tags_json")
   [[ -n "$latest" ]] || die "could not resolve a latest stable version from GitHub tags for $repo."
   printf '%s\n' "$latest"
+}
+
+list_component_versions() {
+  local component=$1
+  local repo tags_url tags_json tag_count versions
+  is_in_list "$component" "${INSTALL_COMPONENTS[@]}" || die "unknown component: $component"
+  need_command curl
+  need_command jq
+  repo=$(component_repo "$component")
+  tags_url="https://api.github.com/repos/${repo}/tags?per_page=100"
+  tags_json=$(curl -fsSL "$tags_url") || die "failed to query GitHub tags API: $tags_url"
+  tag_count=$(jq 'length' <<< "$tags_json")
+  if [[ "$tag_count" == "100" ]]; then
+    warn "the GitHub tags API returned 100 tags."
+    warn "Additional tags may exist, so the version list may be incomplete."
+  fi
+  versions=$(jq -r '[.[].name as $tag | $tag | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | capture("^v(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)$") | {tag: $tag, major: (.major | tonumber), minor: (.minor | tonumber), patch: (.patch | tonumber)}] | sort_by(.major, .minor, .patch) | reverse | .[].tag' <<< "$tags_json")
+  [[ -n "$versions" ]] || die "no stable versions found for $component."
+  printf '%s:\n' "$component"
+  while IFS= read -r version; do
+    printf '  %s\n' "$version"
+  done <<< "$versions"
 }
 
 download_and_extract_release() {
@@ -474,6 +512,16 @@ EOF
 # backend install/update/uninstall/prune subcommands
 # -----------------------------------------------------------------------------
 
+cmd_backend_versions() {
+  if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+    usage_backend_versions
+    return
+  fi
+  local component=${1:-}
+  [[ -n "$component" && $# -eq 1 ]] || { usage_backend_versions; exit 1; }
+  list_component_versions "$component"
+}
+
 cmd_backend_install() {
   if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
     usage_backend_install
@@ -606,7 +654,7 @@ cmd_backend_prune() {
 }
 
 # -----------------------------------------------------------------------------
-# backend start/stop/status subcommands
+# backend start/stop/restart/status subcommands
 # -----------------------------------------------------------------------------
 
 pid_alive() {
@@ -745,6 +793,31 @@ cmd_backend_stop() {
   stop_service "$target"
 }
 
+cmd_backend_restart() {
+  if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+    usage_backend_restart
+    return
+  fi
+  validate_backend_env
+  local target=${1:-}
+  [[ -n "$target" && $# -eq 1 ]] || { usage_backend_restart; exit 1; }
+  if [[ "$target" == "all" ]]; then
+    local service status=0
+    for service in "${STOP_ALL_ORDER[@]}"; do
+      if ! stop_service "$service"; then
+        status=1
+      fi
+    done
+    [[ "$status" -eq 0 ]] || return "$status"
+    for service in "${START_ALL_ORDER[@]}"; do
+      start_service "$service"
+    done
+    return
+  fi
+  stop_service "$target"
+  start_service "$target"
+}
+
 cmd_backend_status() {
   validate_backend_env
   local service pid_file pid
@@ -793,20 +866,9 @@ cmd_backend_device_status() {
 
 cmd_backend_info() {
   validate_backend_env
-  local component version dir python_path python_version
+  local component version dir
   log "=== Environment (.metadata) ==="
   cat .metadata
-  log ""
-  python_path=$(command -v python3 || command -v python || true)
-  if [[ -n "$python_path" ]]; then
-    python_version=$("$python_path" --version 2>&1 || true)
-  else
-    python_version="not found"
-  fi
-  log "python_path = ${python_path:-not found}"
-  log "python_version = $python_version"
-  log ""
-  log "install_root = $INSTALL_ROOT"
   log ""
   log "=== Installed Backend Releases ==="
   for component in "${INSTALL_COMPONENTS[@]}"; do
@@ -834,6 +896,10 @@ cmd_backend() {
       shift
       cmd_backend_install "$@"
       ;;
+    versions)
+      shift
+      cmd_backend_versions "$@"
+      ;;
     uninstall)
       shift
       cmd_backend_uninstall "$@"
@@ -853,6 +919,10 @@ cmd_backend() {
     stop)
       shift
       cmd_backend_stop "$@"
+      ;;
+    restart)
+      shift
+      cmd_backend_restart "$@"
       ;;
     status)
       shift
@@ -894,11 +964,15 @@ _oqtopus()
           COMPREPLY=( $(compgen -W "engine tranqu gateway all help --help" -- "$cur") )
           return 0
           ;;
+        versions)
+          COMPREPLY=( $(compgen -W "engine tranqu gateway help --help" -- "$cur") )
+          return 0
+          ;;
         update|uninstall)
           COMPREPLY=( $(compgen -W "engine tranqu gateway help --help" -- "$cur") )
           return 0
           ;;
-        start|stop)
+        start|stop|restart)
           COMPREPLY=( $(compgen -W "core sse_engine mitigator estimator combiner tranqu gateway all help --help" -- "$cur") )
           return 0
           ;;
@@ -907,7 +981,7 @@ _oqtopus()
           return 0
           ;;
         *)
-          COMPREPLY=( $(compgen -W "install uninstall update prune start stop status device-status info help --help" -- "$cur") )
+          COMPREPLY=( $(compgen -W "install versions uninstall update prune start stop restart status device-status info help --help" -- "$cur") )
           return 0
           ;;
       esac
@@ -937,7 +1011,7 @@ completion_zsh() {
 _oqtopus() {
   local -a commands backend_commands install_components update_components services device_status shells templates
   commands=(init backend completion version help --help --version)
-  backend_commands=(install uninstall update prune start stop status device-status info help --help)
+  backend_commands=(install versions uninstall update prune start stop restart status device-status info help --help)
   install_components=(engine tranqu gateway all help --help)
   update_components=(engine tranqu gateway help --help)
   services=(core sse_engine mitigator estimator combiner tranqu gateway all help --help)
@@ -949,8 +1023,8 @@ _oqtopus() {
     backend)
       case $words[3] in
         install) compadd -- $install_components ;;
-        update|uninstall) compadd -- $update_components ;;
-        start|stop) compadd -- $services ;;
+        versions|update|uninstall) compadd -- $update_components ;;
+        start|stop|restart) compadd -- $services ;;
         device-status) compadd -- $device_status ;;
         *) compadd -- $backend_commands ;;
       esac
@@ -970,10 +1044,10 @@ completion_fish() {
 complete -c oqtopus -f -n "__fish_use_subcommand" -a "init backend completion version help --help --version"
 complete -c oqtopus -f -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
 complete -c oqtopus -f -n "__fish_seen_subcommand_from init" -a "--template backend cloud help --help"
-complete -c oqtopus -f -n "__fish_seen_subcommand_from backend" -a "install uninstall update prune start stop status device-status info help --help"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from backend" -a "install versions uninstall update prune start stop restart status device-status info help --help"
 complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from install" -a "engine tranqu gateway all help --help"
-complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from update uninstall" -a "engine tranqu gateway help --help"
-complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from start stop" -a "core sse_engine mitigator estimator combiner tranqu gateway all help --help"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from versions update uninstall" -a "engine tranqu gateway help --help"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from start stop restart" -a "core sse_engine mitigator estimator combiner tranqu gateway all help --help"
 complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from device-status" -a "show active inactive maintenance help --help"
 EOF
 }

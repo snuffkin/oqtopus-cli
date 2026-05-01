@@ -11,7 +11,7 @@ oqtopus completion fish
 Completion includes commands, subcommands, flags, templates, component names,
 service names, and device status values.
 
-Version strings are not completed.
+Version strings are not completed, including for `oqtopus backend versions`.
 
 ## Installer Behavior
 

@@ -24,6 +24,27 @@ The installable components are not the same as the process targets used by
 it provides multiple managed services such as `core`, `sse_engine`,
 `mitigator`, `estimator`, and `combiner`.
 
+## List Available Versions
+
+```bash
+oqtopus backend versions engine
+```
+
+This lists stable versions available for a component:
+
+```text
+engine:
+  v1.3.0
+  v1.2.1
+  v1.2.0
+```
+
+The command reads remote GitHub tags and shows stable semantic version tags in
+`vX.Y.Z` format. Pre-release tags are not shown.
+
+You can run this command from any directory. It does not require a backend
+environment.
+
 ## Install All Components
 
 ```bash

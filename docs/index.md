@@ -12,18 +12,18 @@
 OQTOPUS backend environment.
 
 The CLI provides a single `oqtopus` command for the common lifecycle of a local
-backend: create an environment, install backend component releases, start and
-stop services, inspect status, and clean up unused installations. It is designed
-to make OQTOPUS backend operation feel closer to familiar developer tools such
-as package managers and service managers, while keeping the underlying
-configuration files available for users who need to edit them.
+backend: create an environment, install backend component releases, start,
+stop, and restart services, inspect status, and clean up unused installations.
+It is designed to make OQTOPUS backend operation feel closer to familiar
+developer tools such as package managers and service managers, while keeping
+the underlying configuration files available for users who need to edit them.
 
 With OQTOPUS CLI, users can:
 
 - create a backend environment from the official template;
 - install and update backend components such as `engine`, `tranqu`, and
   `gateway`;
-- start and stop managed backend services including `core`, `sse_engine`,
+- start, stop, and restart managed backend services including `core`, `sse_engine`,
   `mitigator`, `estimator`, `combiner`, `tranqu`, and `gateway`;
 - check process status and backend environment information;
 - keep installed component versions isolated under the local data directory;

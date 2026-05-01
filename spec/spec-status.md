@@ -12,6 +12,8 @@ This document tracks the current status of the OQTOPUS CLI specification.
   the immediate v1.0.0 implementation.
 - `oqtopus init` is used to create environments.
 - `oqtopus backend` is used to manage backend components.
+- `oqtopus backend versions` lists available stable component versions from
+  remote GitHub tags without requiring backend environment validation.
 - `oqtopus backend device-status` is used to show or update the local gateway
   device status file.
 - `oqtopus completion <bash|zsh|fish>` prints shell completion scripts.
@@ -95,6 +97,10 @@ The backend components currently in scope are:
 
 ### Install behavior
 
+- `oqtopus backend versions <engine|tranqu|gateway>` lists available stable
+  versions for a component.
+- `versions` uses GitHub tags, includes only `vX.Y.Z`, sorts by semantic
+  version descending, and does not support `all`.
 - `oqtopus backend install all` installs `engine`, `tranqu`, and `gateway`.
 - `install all` resolves the latest stable version independently for each
   component.
@@ -226,6 +232,7 @@ The backend components currently in scope are:
 
 - `oqtopus backend start all` starts all managed services.
 - `oqtopus backend stop all` stops all managed services.
+- `oqtopus backend restart all` restarts all managed services.
 - Start order is `gateway`, `tranqu`, `mitigator`, `estimator`, `combiner`,
   `sse_engine`, `core`.
 - Stop order is the reverse of start order.
@@ -233,6 +240,10 @@ The backend components currently in scope are:
   started services running; rollback is not performed automatically.
 - If `stop all` fails for one service, the command continues attempting to stop
   remaining services and exits non-zero.
+- `restart <service>` stops the service and starts it again only if stop
+  succeeds.
+- `restart all` stops all services first; if every stop succeeds, it starts all
+  services using the normal start order.
 - If a PID file exists and the recorded process is alive, `start` fails.
 - If a PID file exists and the recorded process is not alive, the PID file is
   treated as stale and removed.

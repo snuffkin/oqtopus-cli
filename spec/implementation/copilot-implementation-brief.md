@@ -128,6 +128,7 @@ oqtopus --help
 oqtopus version
 oqtopus --version
 oqtopus completion <bash|zsh|fish>
+oqtopus backend versions <engine|tranqu|gateway>
 oqtopus backend install <engine|tranqu|gateway> [version]
 oqtopus backend install all
 oqtopus backend uninstall <engine|tranqu|gateway> <version>
@@ -135,6 +136,7 @@ oqtopus backend update <engine|tranqu|gateway>
 oqtopus backend prune
 oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
 oqtopus backend stop <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+oqtopus backend restart <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
 oqtopus backend status
 oqtopus backend device-status show
 oqtopus backend device-status active
@@ -182,10 +184,11 @@ names, but must not complete version strings or make network requests.
 
 Completion must include `device-status` under `oqtopus backend`, and `show`,
 `active`, `inactive`, and `maintenance` under `oqtopus backend device-status`.
-Completion for `start` and `stop` must include `all` in addition to individual
-service names.
+Completion for `start`, `stop`, and `restart` must include `all` in addition
+to individual service names.
 Completion for `install` must include `all` in addition to `engine`, `tranqu`,
 and `gateway`.
+Completion for `versions` must include `engine`, `tranqu`, and `gateway`.
 
 ## Component Repository Mapping
 
@@ -256,6 +259,34 @@ gateway_version=<version>
 
 When updating a binding, preserve unrelated fields.
 The update should avoid leaving a partially written `.metadata`.
+
+## Install Behavior
+
+## Versions Behavior
+
+Command:
+
+```bash
+oqtopus backend versions <component>
+```
+
+Required behavior:
+
+1. Does not run backend environment validation.
+2. Supports `engine`, `tranqu`, and `gateway`.
+3. Does not support `all`.
+4. Queries the component repository tags API with `?per_page=100`.
+5. Includes only stable semantic version tags in `vX.Y.Z` format.
+6. Sorts versions by semantic version descending.
+7. Prints:
+
+```text
+engine:
+  v1.3.0
+  v1.2.1
+```
+
+If no stable versions are found, exit non-zero with a clear error.
 
 ## Install Behavior
 
@@ -411,6 +442,21 @@ gateway
 If stopping any service fails, continue attempting to stop remaining services
 and exit non-zero after reporting the failure.
 
+## Restart Behavior
+
+Command:
+
+```bash
+oqtopus backend restart <component|all>
+```
+
+For a single service, restart stops the service and then starts it again. If
+stop fails, restart fails and does not start the service.
+
+For `restart all`, stop all services using the same behavior as `stop all`.
+Only if every stop succeeds, start all services using the same behavior as
+`start all`.
+
 ## Status Behavior
 
 Command:
@@ -466,8 +512,11 @@ Print:
 
 1. Environment metadata.
 2. Installed releases grouped by component.
-3. Python executable and version if available.
-4. Expanded paths.
+3. Expanded paths recorded in `.metadata`.
+
+Do not print Python executable or Python version information. Managed services
+run through component-specific `uv` environments, so a single process-level
+Python path would be misleading.
 
 ## Prune Behavior
 
@@ -509,8 +558,8 @@ For safety, the PoC should print each deletion.
   using each component's independently resolved latest stable version.
 - `oqtopus backend device-status` directly shows or updates
   `config/gateway/device_status`.
-- `oqtopus backend start all` and `oqtopus backend stop all` operate on all
-  managed services.
+- `oqtopus backend start all`, `oqtopus backend stop all`, and
+  `oqtopus backend restart all` operate on all managed services.
 - `oqtopus version` / `oqtopus --version` report the CLI version.
 - `oqtopus backend info` reports backend environment information.
 - `oqtopus completion <bash|zsh|fish>` provides shell completion without
