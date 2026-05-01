@@ -16,10 +16,18 @@ top-level CLI named `oqtopus`.
 Use the following repository layout:
 
 - `spec/`: specifications and implementation planning documents
+- `README.md`: GitHub repository landing page; keep it lightweight with a
+  brief overview and links
+- `docs/index.md`: root of the user-facing documentation
+- `docs/`: user-facing explanations, usage guides, and expanded documentation
 - `templates/`: environment templates used by `oqtopus init`
 - `scripts/`: helper scripts such as `install.sh`
 - `bin/oqtopus`: shell-based CLI entrypoint for the current PoC
 - `src/`: future Rust implementation
+
+When adding user-facing explanations or usage documentation, update files under
+`docs/`. Keep implementation notes, AI handoff material, and specification
+updates under `spec/`.
 
 ## Implementation Phases
 

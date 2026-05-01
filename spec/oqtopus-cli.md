@@ -2,8 +2,9 @@
 
 This document defines the official behavior and interface of the
 OQTOPUS Local Backend Environment CLI.
-The CLI is implemented in **Rust** and distributed as a standalone executable
-named `oqtopus`.
+For v1.0.0, the CLI is provided as a shell-based executable named `oqtopus`.
+A Rust implementation is planned for a future release after the shell behavior
+is validated.
 
 ## 1. Overview
 
@@ -556,7 +557,16 @@ Templates are stored in the `templates/` directory of the official repository:
 5. `.metadata` is not downloaded as a literal template file. It is generated
    dynamically by `oqtopus init`.
 
-## 11. Rust Implementation Requirements
+## 11. Implementation Requirements
+
+### 11.1 v1.0.0 shell implementation
+
+- CLI provided as `bin/oqtopus`.
+- Portable across Linux/macOS.
+- May rely on common POSIX utilities plus `bash`, `curl`, `tar`, `jq`, and `uv`.
+- No Windows support for v1.0.0.
+
+### 11.2 Future Rust implementation
 
 - CLI implemented using **clap**.
 - Network operations via **reqwest**.

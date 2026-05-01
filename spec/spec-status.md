@@ -7,6 +7,9 @@ This document tracks the current status of the OQTOPUS CLI specification.
 ### Command structure
 
 - The CLI entrypoint is `oqtopus`.
+- v1.0.0 is provided as a shell-based CLI.
+- A Rust implementation is planned for a future release, but is not part of
+  the immediate v1.0.0 implementation.
 - `oqtopus init` is used to create environments.
 - `oqtopus backend` is used to manage backend components.
 - `oqtopus backend` must fail if it is executed outside a directory created by
@@ -21,10 +24,19 @@ This document tracks the current status of the OQTOPUS CLI specification.
 ### Repository layout
 
 - `spec/`: specifications and implementation planning documents
+- `README.md`: GitHub repository landing page; keep it lightweight with a
+  brief overview and links.
+- `docs/index.md`: root of the user-facing documentation.
+- `docs/`: user-facing explanations, usage guides, and expanded documentation
+  should be updated here.
 - `templates/`: environment templates used by `oqtopus init`
 - `scripts/`: helper scripts such as `install.sh`
 - `bin/oqtopus`: current shell-based CLI entrypoint
 - `src/`: future Rust implementation
+
+User-facing documentation should be expanded under `docs/`, not in
+`README.md`. Implementation notes, AI handoff material, and specification
+updates should continue to live under `spec/`.
 
 ### Main specification documents
 
