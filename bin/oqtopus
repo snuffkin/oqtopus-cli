@@ -20,6 +20,10 @@ STOP_ALL_ORDER=(core sse_engine combiner estimator mitigator tranqu gateway)
 ENV_ROOT=""
 INSTALL_ROOT=""
 
+# -----------------------------------------------------------------------------
+# Common output and command helpers
+# -----------------------------------------------------------------------------
+
 log() {
   printf '%s\n' "$*"
 }
@@ -38,6 +42,10 @@ need_command() {
     die "'$1' is required but was not found on PATH."
   fi
 }
+
+# -----------------------------------------------------------------------------
+# Help text
+# -----------------------------------------------------------------------------
 
 usage_top() {
   cat <<'EOF'
@@ -140,6 +148,10 @@ Usage:
 EOF
 }
 
+# -----------------------------------------------------------------------------
+# Generic path and metadata helpers
+# -----------------------------------------------------------------------------
+
 is_in_list() {
   local needle=$1
   shift
@@ -200,6 +212,10 @@ metadata_set() {
   mv "$tmp" "$file"
 }
 
+# -----------------------------------------------------------------------------
+# Backend component and service mapping
+# -----------------------------------------------------------------------------
+
 component_repo() {
   case "$1" in
     engine) printf '%s\n' "$ENGINE_REPO" ;;
@@ -233,6 +249,10 @@ service_module() {
     *) return 1 ;;
   esac
 }
+
+# -----------------------------------------------------------------------------
+# Environment registry
+# -----------------------------------------------------------------------------
 
 ensure_registry_file() {
   need_command jq
@@ -273,6 +293,8 @@ write_registry_entries() {
   mv "$tmp" "$registry"
 }
 
+# Verify that the current directory is an OQTOPUS backend environment and that
+# it matches env_root in .metadata.
 validate_backend_env() {
   local current template metadata_env_root
   [[ -f .metadata ]] || die $'.metadata not found.\nThis directory is not an OQTOPUS backend environment.'
@@ -287,6 +309,10 @@ validate_backend_env() {
   INSTALL_ROOT=$(metadata_get install_root) || die "invalid .metadata: missing install_root."
   register_env "$ENV_ROOT"
 }
+
+# -----------------------------------------------------------------------------
+# Version resolution and component installation
+# -----------------------------------------------------------------------------
 
 resolve_latest_version() {
   local repo=$1
@@ -383,6 +409,10 @@ install_component() {
   log "Bound $binding_key=$version"
 }
 
+# -----------------------------------------------------------------------------
+# init subcommand
+# -----------------------------------------------------------------------------
+
 download_backend_template() {
   local env_dir=$1
   local tmp_dir archive extract_dir template_dir url
@@ -439,6 +469,10 @@ EOF
   register_env "$env_abs"
   log "Created backend environment: $env_abs"
 }
+
+# -----------------------------------------------------------------------------
+# backend install/update/uninstall/prune subcommands
+# -----------------------------------------------------------------------------
 
 cmd_backend_install() {
   if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
@@ -571,6 +605,10 @@ cmd_backend_prune() {
   rm -rf "$tmp_dir"
 }
 
+# -----------------------------------------------------------------------------
+# backend start/stop/status subcommands
+# -----------------------------------------------------------------------------
+
 pid_alive() {
   local pid=$1
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
@@ -595,6 +633,8 @@ load_env_exports() {
   done < "$file"
 }
 
+# Build the uv command line for a managed service from .metadata bindings and
+# the environment-local config files.
 service_command() {
   local service=$1
   local component version project module
@@ -723,6 +763,10 @@ cmd_backend_status() {
   done
 }
 
+# -----------------------------------------------------------------------------
+# backend device-status and info subcommands
+# -----------------------------------------------------------------------------
+
 cmd_backend_device_status() {
   if [[ "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
     usage_backend_device_status
@@ -777,6 +821,10 @@ cmd_backend_info() {
   done
 }
 
+# -----------------------------------------------------------------------------
+# backend command dispatcher
+# -----------------------------------------------------------------------------
+
 cmd_backend() {
   case "${1:-}" in
     help|--help|"")
@@ -825,6 +873,10 @@ cmd_backend() {
       ;;
   esac
 }
+
+# -----------------------------------------------------------------------------
+# completion subcommand
+# -----------------------------------------------------------------------------
 
 completion_bash() {
   cat <<'EOF'
@@ -939,6 +991,10 @@ cmd_completion() {
     *) die "unsupported shell: $1" ;;
   esac
 }
+
+# -----------------------------------------------------------------------------
+# Top-level command dispatcher
+# -----------------------------------------------------------------------------
 
 main() {
   case "${1:-}" in
