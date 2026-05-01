@@ -47,6 +47,7 @@ The scripts may use common POSIX utilities plus:
 - `tar`
 - `jq`
 - `uv`
+- `docker` when installing `engine`
 
 If a required command is missing, print a clear error and exit non-zero.
 
@@ -77,19 +78,35 @@ Required behavior:
 1. Create `<env_name>/`.
 2. Create:
    - `.metadata`
-   - `.env`
    - `config/`
+   - `config/.env`
    - `logs/`
    - `pids/`
+   - `sse_work/`
 3. Resolve `install_root`.
 4. Write absolute `env_root` and `install_root` to `.metadata`.
 5. Register the environment path in the central registry.
 6. Do not create a per-environment CLI binary.
    The `oqtopus` executable is expected to be installed in a directory on
    the user's `PATH`, so it can be run from anywhere.
+7. Create runtime directories dynamically. These are not copied from the
+   template repository:
+   - `pids/`
+   - `sse_work/`
+   - `logs/core/`
+   - `logs/sse_engine/`
+   - `logs/mitigator/`
+   - `logs/estimator/`
+   - `logs/combiner/`
+   - `logs/tranqu/`
+   - `logs/gateway/`
 
 Only the `backend` template is required for the PoC.
 The `cloud` template should return a clear "not implemented" error.
+
+For v1.0.0, `oqtopus init` MUST download the backend template from GitHub using
+the `templates/backend/` tree from the `main` branch. It MUST NOT create the
+template from hard-coded local shell logic.
 
 ### `oqtopus backend`
 
@@ -106,25 +123,73 @@ Required commands:
 
 ```bash
 oqtopus init <env_name> --template backend
+oqtopus help
+oqtopus --help
+oqtopus version
+oqtopus --version
+oqtopus completion <bash|zsh|fish>
 oqtopus backend install <engine|tranqu|gateway> [version]
+oqtopus backend install all
 oqtopus backend uninstall <engine|tranqu|gateway> <version>
 oqtopus backend update <engine|tranqu|gateway>
 oqtopus backend prune
-oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway>
-oqtopus backend stop <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway>
+oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+oqtopus backend stop <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
 oqtopus backend status
+oqtopus backend device-status show
+oqtopus backend device-status active
+oqtopus backend device-status inactive
+oqtopus backend device-status maintenance
 oqtopus backend info
 ```
 
 The script should parse subcommands as:
 
 ```text
-oqtopus <init|backend> ...
+oqtopus <init|backend|completion|version|help> ...
 ```
+
+## Help, Version, and Completion
+
+The CLI must support help at the top level and for subcommands:
+
+```bash
+oqtopus help
+oqtopus --help
+oqtopus init help
+oqtopus init --help
+oqtopus backend help
+oqtopus backend --help
+oqtopus backend install help
+oqtopus backend install --help
+```
+
+The same pattern applies to all backend subcommands. Help and version commands
+must not require backend environment validation.
+
+`oqtopus version` and `oqtopus --version` print the installed CLI version, for
+example:
+
+```text
+oqtopus v1.0.0
+```
+
+`oqtopus backend info` remains the backend environment information command.
+
+`oqtopus completion <bash|zsh|fish>` prints shell completion scripts to stdout.
+Completion must cover commands, subcommands, flags, templates, and component
+names, but must not complete version strings or make network requests.
+
+Completion must include `device-status` under `oqtopus backend`, and `show`,
+`active`, `inactive`, and `maintenance` under `oqtopus backend device-status`.
+Completion for `start` and `stop` must include `all` in addition to individual
+service names.
+Completion for `install` must include `all` in addition to `engine`, `tranqu`,
+and `gateway`.
 
 ## Component Repository Mapping
 
-Use this mapping for downloads and latest-release lookups:
+Use this mapping for downloads and latest-version lookups:
 
 | Component | GitHub repository |
 |-----------|-------------------|
@@ -141,10 +206,13 @@ https://github.com/<owner>/<repo>/archive/refs/tags/<version>.tar.gz
 Latest version lookup:
 
 ```text
-https://api.github.com/repos/<owner>/<repo>/releases/latest
+https://api.github.com/repos/<owner>/<repo>/tags?per_page=100
 ```
 
-Read `.tag_name` from the JSON response.
+Select the newest stable semantic version tag in `vX.Y.Z` format. Pre-release
+tags are excluded from automatic latest selection. If exactly 100 tags are
+returned, print a warning that additional tags may exist and latest version
+resolution may be incomplete.
 
 ## Path Rules
 
@@ -195,13 +263,17 @@ Command:
 
 ```bash
 oqtopus backend install <component> [version]
+oqtopus backend install all
 ```
 
 Required behavior:
 
 1. Resolve version:
    - Use the provided version if present.
-   - Otherwise fetch the latest GitHub release tag.
+   - Otherwise fetch GitHub tags and select the newest stable semantic version
+     tag in `vX.Y.Z` format.
+   - For `install all`, resolve the latest stable version independently for
+     `engine`, `tranqu`, and `gateway`.
 2. Create `<install_root>/<component>-<version>/`.
 3. Download the release archive.
 4. Extract it into the target directory with the top-level archive directory removed.
@@ -211,17 +283,53 @@ Required behavior:
 uv sync --frozen --no-dev --project <install_root>/<component>-<version>/
 ```
 
-6. Update the component version binding in `.metadata`.
+6. If the component is `engine`, build the `sse_runtime` Docker image from:
 
-If the target directory already exists and contains `.venv`, the command may
-skip download and run validation instead.
+```text
+<install_root>/engine-<version>/sse_runtime/Dockerfile
+```
+
+Load `SSE_CONTAINER_IMAGE`, `UID`, and `GID` from `<env_root>/config/.env`.
+Run the equivalent of:
+
+```bash
+docker build <install_root>/engine-<version>/sse_runtime \
+  -t <SSE_CONTAINER_IMAGE> \
+  --build-arg UID=<UID> \
+  --build-arg GID=<GID>
+```
+
+If Docker is unavailable, the Dockerfile is missing, required variables are
+missing from `config/.env`, or the build fails, `oqtopus backend install engine`
+must fail and must not update `engine_version`.
+
+7. Update the component version binding in `.metadata`.
+
+If the target directory already exists and contains `.venv`, reuse it and update
+the metadata binding. If the target directory exists but does not contain
+`.venv`, treat it as an incomplete installation: remove that component-version
+directory and download/extract/sync it again. A `--force` option is deferred to a
+future release.
+
+For `oqtopus backend install all`, install components in this order:
+
+```text
+engine
+tranqu
+gateway
+```
+
+`install all` does not accept a version argument. If installing any component
+fails, stop immediately and return non-zero. Components already installed
+successfully by the same command keep their metadata bindings; do not roll them
+back automatically. The failed component must not update its metadata binding.
 
 ## Start Behavior
 
 Command:
 
 ```bash
-oqtopus backend start <component>
+oqtopus backend start <component|all>
 ```
 
 Required behavior:
@@ -229,25 +337,36 @@ Required behavior:
 1. Check `pids/<component>.pid`.
 2. If the PID is alive, exit with an error.
 3. If the PID file is stale, delete it.
-4. Load valid `key=value` lines from `.env`.
+4. Load valid `key=value` lines from `config/.env`.
 5. Start the component in the background.
 6. Write the process PID to `pids/<component>.pid`.
-7. Write stdout/stderr to `logs/<component>.log`.
+7. Redirect stdout/stderr to `/dev/null`. The CLI must not create log files
+   itself; application log files are created according to `logging.yaml`.
 
-For PoC placeholder components:
+For v1.0.0, placeholder processes are development/test-only and MUST NOT be the
+default user-facing behavior. If the required component version binding is
+missing from `.metadata`, or the installed release directory is missing, `start`
+MUST fail with a clear error.
 
-- `core`
-- `sse_engine`
-- `mitigator`
-- `estimator`
-- `combiner`
-- `gateway`
+`core`, `sse_engine`, `mitigator`, `estimator`, and `combiner` are launched from
+the installed `engine` release. `gateway` is managed as a Python/uv component in
+the same style as `engine` and `tranqu`.
 
-Start a long-running placeholder process such as:
+`oqtopus backend start all` starts all managed services in this order:
 
-```bash
-sleep infinity
+```text
+gateway
+tranqu
+mitigator
+estimator
+combiner
+sse_engine
+core
 ```
+
+If starting any service fails, stop immediately and return non-zero. Services
+already started by the same command are left running; do not roll them back
+automatically.
 
 For `tranqu`, use the installed version from `.metadata`:
 
@@ -264,7 +383,7 @@ If `tranqu_version` is missing, print a clear error.
 Command:
 
 ```bash
-oqtopus backend stop <component>
+oqtopus backend stop <component|all>
 ```
 
 Required behavior:
@@ -275,6 +394,22 @@ Required behavior:
 4. Wait briefly for shutdown.
 5. If the process is still alive, return a clear error.
 6. Remove the PID file only after the process has stopped or if it was stale.
+
+For `oqtopus backend stop all`, stop all managed services in reverse start
+order:
+
+```text
+core
+sse_engine
+combiner
+estimator
+mitigator
+tranqu
+gateway
+```
+
+If stopping any service fails, continue attempting to stop remaining services
+and exit non-zero after reporting the failure.
 
 ## Status Behavior
 
@@ -295,6 +430,29 @@ combiner: Stopped
 tranqu: Stopped
 gateway: Stopped
 ```
+
+## Device Status Behavior
+
+Commands:
+
+```bash
+oqtopus backend device-status show
+oqtopus backend device-status active
+oqtopus backend device-status inactive
+oqtopus backend device-status maintenance
+```
+
+Required behavior:
+
+1. Run standard backend environment validation.
+2. Operate on `<env_root>/config/gateway/device_status`.
+3. If the file does not exist, fail with a clear error.
+4. `show` prints the current file contents.
+5. `active`, `inactive`, and `maintenance` write the matching value to the
+   file.
+6. The command does not require `gateway` to be running.
+7. The command directly updates the local configuration file and does not call
+   scripts from the installed `gateway` release.
 
 ## Info Behavior
 
@@ -329,6 +487,35 @@ Required behavior:
 
 For safety, the PoC should print each deletion.
 
+## Decided Implementation Questions
+
+- `oqtopus backend install` updates `.metadata` automatically.
+- `oqtopus backend uninstall` refuses to remove a version referenced by any
+  registered environment.
+- `oqtopus backend prune --yes` skips the confirmation prompt.
+- Placeholder processes are development/test-only, not default v1.0.0 behavior.
+- `oqtopus init` downloads templates from GitHub for v1.0.0.
+- `gateway` is managed as a Python/uv component for v1.0.0.
+- Runtime stdout/stderr is redirected to `/dev/null`.
+- The CLI does not create log files itself; application log files are created
+  according to `logging.yaml`.
+- `templates/backend/config/.env` is distributed as the initial environment
+  variable file. It must not contain secrets.
+- `oqtopus init` creates `sse_work/` as an empty host-side work directory for
+  `sse_runtime` containers. It is not copied from `templates/`.
+- `oqtopus backend install engine` builds the `sse_runtime` Docker image from
+  the installed engine release before updating `engine_version`.
+- `oqtopus backend install all` installs `engine`, `tranqu`, and `gateway`
+  using each component's independently resolved latest stable version.
+- `oqtopus backend device-status` directly shows or updates
+  `config/gateway/device_status`.
+- `oqtopus backend start all` and `oqtopus backend stop all` operate on all
+  managed services.
+- `oqtopus version` / `oqtopus --version` report the CLI version.
+- `oqtopus backend info` reports backend environment information.
+- `oqtopus completion <bash|zsh|fish>` provides shell completion without
+  version completion or network access.
+
 ## Acceptance Criteria
 
 The PoC is complete when the following manual flow works:
@@ -347,20 +534,17 @@ oqtopus backend info
 Expected result:
 
 - `demo/.metadata` contains absolute `env_root` and `install_root`.
+- `demo/sse_work/` exists as an initially empty host-side work directory.
+- `demo/logs/core/` and other managed service log directories exist.
 - `core` transitions from stopped to running to stopped.
 - PID files are created and removed correctly.
-- Logs are written under `demo/logs/`.
+- The CLI does not create log files; backend applications create logs according
+  to their `logging.yaml` configuration.
 - Running `oqtopus backend ...` outside `demo/` fails validation.
 - The same `oqtopus` executable is callable both inside and outside the
   environment because it is installed on `PATH`.
 
 ## Open Questions
 
-These should be decided before the Rust implementation:
-
-1. Should `oqtopus backend install` update `.metadata` automatically, or should binding be a separate command?
-2. Should `uninstall` refuse to remove a version currently referenced by any registered environment?
-3. Should `prune` require an explicit confirmation flag in Rust, such as `--yes`?
-4. Should placeholder components remain available in Rust, or are they PoC-only?
-5. Should `oqtopus init` download templates in the shell PoC, or create the backend template locally?
-6. Should `gateway` eventually be managed like Python components via `uv`, or as a separate binary/process type?
+No v1.0.0-blocking open questions are currently known. Rust-specific internal
+structure remains deferred until the future Rust implementation phase.

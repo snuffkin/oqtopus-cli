@@ -17,6 +17,12 @@ OQTOPUS CLI provides a single top-level command `oqtopus`:
   - Supports install / uninstall / update / prune.
   - Starts and stops backend processes.
   - Validates environment integrity before executing commands.
+- `oqtopus completion`
+  - Prints shell completion scripts for supported shells.
+- `oqtopus version`
+  - Prints the installed OQTOPUS CLI version.
+- `oqtopus help`
+  - Prints help for the top-level command and subcommands.
 
 Current support target:
 
@@ -30,19 +36,25 @@ Current support target:
 ```text
 <env_name>/
   .metadata       # environment-specific metadata
-  .env            # environment variables
-  config/         # configuration files for each microservice
-  logs/           # per-service log directories
+  config/         # configuration files and environment variables
+    .env          # environment variables for launched backend processes
+  logs/           # per-service log directories such as logs/core/
   pids/           # PID files such as core.pid
+  sse_work/       # host-side work directory for dynamically launched sse_runtime containers
 ```
 
 No backend code is installed at init time.
 
-The `logs/` directory contains one subdirectory for each managed service, such
-as `logs/core/`, `logs/sse_engine/`, and `logs/tranqu/`.
+The `logs/` directory contains one initially empty subdirectory for each managed
+service, such as `logs/core/`, `logs/sse_engine/`, and `logs/tranqu/`.
 
 The `pids/` directory stores PID files using the `<component>.pid` naming
 convention, such as `core.pid`, `sse_engine.pid`, and `tranqu.pid`.
+
+The `sse_work/` directory is an initially empty host-side working directory used
+by dynamically launched `sse_runtime` Docker containers.
+The default `SSE_HOST_WORK_PATH` in `config/.env` SHOULD point to this directory
+relative to `env_root`.
 
 ## 3. .metadata Specification
 
@@ -94,6 +106,17 @@ oqtopus init <env_name> --template <template>
    The `oqtopus` executable is expected to already be installed in a location
    on the user's `PATH`.
 7. Does **NOT** install backend components.
+8. Creates runtime directories dynamically. These are not copied from the
+   template repository:
+   - `pids/`
+   - `sse_work/`
+   - `logs/core/`
+   - `logs/sse_engine/`
+   - `logs/mitigator/`
+   - `logs/estimator/`
+   - `logs/combiner/`
+   - `logs/tranqu/`
+   - `logs/gateway/`
 
 The `templates/backend/` directory is treated as the source template root.
 Its files are copied into `<env_name>/`, except for `.metadata`, which is
@@ -103,6 +126,7 @@ The expected configuration tree under `templates/backend/config/` is:
 
 ```text
 templates/backend/config/
+  .env
   core/
     config.yaml
     logging.yaml
@@ -126,9 +150,89 @@ templates/backend/config/
     logging.yaml
 ```
 
-## 5. `oqtopus backend` Specification
+`templates/backend/config/.env` is distributed as the initial environment
+variable file for launched backend processes. It MUST NOT contain secrets.
 
-### 5.1 Mandatory pre-execution checks
+Runtime-only empty directories such as `pids/`, `logs/<component>/`, and
+`sse_work/` are created by `oqtopus init`. They are not represented as template
+files.
+
+## 5. Help, Version, and Completion
+
+### 5.1 Help behavior
+
+The CLI MUST provide help at the top level and for subcommands.
+
+Supported forms:
+
+```bash
+oqtopus help
+oqtopus --help
+oqtopus init help
+oqtopus init --help
+oqtopus backend help
+oqtopus backend --help
+oqtopus backend install help
+oqtopus backend install --help
+```
+
+The same pattern applies to all backend subcommands. Help commands MUST NOT
+require backend environment validation.
+
+### 5.2 Version behavior
+
+The CLI MUST provide:
+
+```bash
+oqtopus version
+oqtopus --version
+```
+
+Both commands print the installed OQTOPUS CLI version and exit successfully
+without requiring backend environment validation.
+
+Suggested output:
+
+```text
+oqtopus v1.0.0
+```
+
+`oqtopus backend info` remains the command for backend environment details such
+as installed component releases, metadata bindings, Python information, and
+expanded paths. `oqtopus version` is only for the CLI version.
+
+### 5.3 Shell completion behavior
+
+The CLI MUST provide:
+
+```bash
+oqtopus completion <bash|zsh|fish>
+```
+
+The command prints the completion script for the requested shell to stdout and
+exits successfully without requiring backend environment validation.
+
+Completion MUST cover:
+
+- Top-level commands: `init`, `backend`, `completion`, `version`, `help`
+- Top-level flags: `--help`, `--version`
+- `oqtopus init`: `--template`, `help`, `--help`
+- Template names: `backend`, `cloud`
+- `oqtopus backend`: `install`, `uninstall`, `update`, `prune`, `start`,
+  `stop`, `status`, `device-status`, `info`, `help`, `--help`
+- `oqtopus backend device-status`: `show`, `active`, `inactive`,
+  `maintenance`, `help`, `--help`
+- Install components: `engine`, `tranqu`, `gateway`, `all`
+- Update/uninstall components: `engine`, `tranqu`, `gateway`
+- Start/stop components: `core`, `sse_engine`, `mitigator`, `estimator`,
+  `combiner`, `tranqu`, `gateway`, `all`
+
+Version strings MUST NOT be completed in v1.0.0. Completion MUST NOT make
+network requests.
+
+## 6. `oqtopus backend` Specification
+
+### 6.1 Mandatory pre-execution checks
 
 Before running ANY backend command, the following validations MUST be executed:
 
@@ -207,7 +311,7 @@ Error: failed to stop 'gateway'.
 The process did not exit within 5 seconds after TERM was sent.
 ```
 
-## 6. Installation Layout (XDG Data Directory)
+## 7. Installation Layout (XDG Data Directory)
 
 `oqtopus backend` manages three backend components:
 
@@ -224,7 +328,7 @@ defined in `.metadata`:
 
 Each installed version is fully self-contained with its own `.venv`.
 
-## 7. Backend Installation Using `uv sync`
+## 8. Backend Installation Using `uv sync`
 
 After extracting a release archive, the CLI MUST perform:
 Executed inside the release directory:
@@ -247,15 +351,18 @@ Behavior:
 - Because each version is isolated in its own directory, rollback is done by
   selecting a different installed version rather than mutating a shared runtime.
 
-## 8. Backend Commands
+## 9. Backend Commands
 
-### 8.1 install
+### 9.1 install
 
 ```bash
 oqtopus backend install <engine|tranqu|gateway> [version]
+oqtopus backend install all
 ```
 
 Downloads and synchronizes the specified component to the shared installation root.
+`all` installs all backend components using each component's latest stable
+version.
 
 Execution Flow:
 
@@ -263,22 +370,30 @@ Execution Flow:
 
    - Uses the provided `version` (e.g., `v2.0.0`).
    - If omitted, queries the public GitHub tags API for the respective repository and selects the newest stable semantic version tag in `vX.Y.Z` format.
+   - `oqtopus backend install all` does not accept a version argument.
+   - For `all`, the CLI resolves the latest stable version independently for
+     `engine`, `tranqu`, and `gateway`.
    - The tags API request SHOULD use `?per_page=100`.
    - If the tags API response contains 100 tags, the CLI SHOULD print a warning
      that additional tags may exist and latest version resolution may be incomplete.
    - Suggested warning:
 
-```text
-Warning: the GitHub tags API returned 100 tags.
-Additional tags may exist, so latest version resolution may be incomplete.
-```
+     ```text
+     Warning: the GitHub tags API returned 100 tags.
+     Additional tags may exist, so latest version resolution may be incomplete.
+     ```
 
    - Pre-release tags are excluded from automatic latest selection.
 
 2. Directory Preparation:
 
    - Creates the target directory: `<install_root>/<component>-<version>/`.
-   - If the directory already exists and contains a valid `.venv`, the CLI may skip the download and only verify the environment.
+   - If the directory already exists and contains a valid `.venv`, the CLI
+     reuses it and updates the metadata binding.
+   - If the directory already exists but does not contain `.venv`, the CLI
+     treats it as an incomplete installation, removes that
+     component-version directory, and downloads/extracts/synchronizes it again.
+   - A `--force` reinstall option is deferred to a future release.
 
 3. Retrieval & Extraction:
 
@@ -293,24 +408,72 @@ Additional tags may exist, so latest version resolution may be incomplete.
    - Executes `uv sync --frozen --no-dev --project <install_root>/<component>-<version>/` inside the target directory.
    - This ensures a deterministic, production-ready `.venv` is created using the Python version specified in the component's `pyproject.toml`.
 
-5. Metadata Binding Update:
+5. SSE Runtime Docker Image Build:
+
+   - When installing `engine`, the CLI MUST build the `sse_runtime` Docker
+     image after `uv sync` succeeds.
+   - The Dockerfile is expected at:
+
+      ```text
+      <install_root>/engine-<version>/sse_runtime/Dockerfile
+      ```
+
+   - The CLI MUST load `SSE_CONTAINER_IMAGE`, `UID`, and `GID` from
+     `<env_root>/config/.env`.
+   - The build command is equivalent to:
+
+      ```bash
+      docker build <install_root>/engine-<version>/sse_runtime \
+          -t <SSE_CONTAINER_IMAGE> \
+          --build-arg UID=<UID> \
+          --build-arg GID=<GID>
+      ```
+
+   - This is based on the existing backend setup `build-sse_runtime` behavior.
+   - If Docker is not available, the Dockerfile is missing, required variables
+     are missing from `config/.env`, or the Docker build fails, `oqtopus
+     backend install engine` MUST fail and MUST NOT update the `engine_version`
+     binding.
+   - Installing `tranqu` or `gateway` does not build `sse_runtime`.
+
+6. Metadata Binding Update:
 
    - After successful installation, the CLI MUST update `.metadata`:
    - Existing bindings are replaced atomically.
 
-6. Configuration Files:
+7. Configuration Files:
 
    - The CLI MUST NOT modify files under `<env_root>/config/` during `install`.
    - If the installed version requires configuration changes, the user MUST
      update the configuration files manually.
 
-```text
-tranqu_version=v0.3.0
-engine_version=v0.3.2
-gateway_version=v0.2.1
-```
+     ```text
+     engine_version=v1.3.2
+     tranqu_version=v1.3.0
+     gateway_version=v1.2.1
+     ```
 
-### 8.2 uninstall
+8. `all` Target:
+
+   - `oqtopus backend install all` installs:
+
+      ```text
+      engine
+      tranqu
+      gateway
+      ```
+
+   - The install order MUST be `engine`, then `tranqu`, then `gateway`.
+   - Each component resolves its own latest stable version independently from
+     its own repository.
+   - `oqtopus backend install all <version>` MUST fail with a usage error.
+   - If installing any component fails, the command MUST stop and return a
+     non-zero exit status.
+   - Components already installed successfully by the same command keep their
+     metadata bindings; rollback is not performed automatically.
+   - The failed component MUST NOT update its metadata binding.
+
+### 9.2 uninstall
 
 ```bash
 oqtopus backend uninstall <component> <version>
@@ -322,7 +485,7 @@ oqtopus backend uninstall <component> <version>
 - `uninstall` does not rewrite `.metadata`; it only operates on versions that
   are not currently referenced.
 
-### 8.3 update
+### 9.3 update
 
 ```bash
 oqtopus backend update <component>
@@ -331,7 +494,7 @@ oqtopus backend update <component>
 - Equivalent to `oqtopus backend install <component> <latest>`.
 - Performs no special processing beyond install plus metadata update.
 
-### 8.4 prune
+### 9.4 prune
 
 ```bash
 oqtopus backend prune
@@ -347,17 +510,17 @@ Suggested interactive prompt:
 ```text
 The following installed releases will be deleted (2):
   - /home/user/.local/share/oqtopus/backend/releases/engine-v1.2.0
-  - /home/user/.local/share/oqtopus/backend/releases/tranqu-v0.4.1
+  - /home/user/.local/share/oqtopus/backend/releases/tranqu-v1.4.1
 
 Proceed? [y/N]:
 ```
 
-### 8.5 start
+### 9.5 start
 
 Starts backend processes.
 
 ```bash
-oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway>
+oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
 ```
 
 Expected behavior:
@@ -370,14 +533,20 @@ Expected behavior:
      - If the PID is still alive → the CLI MUST exit with an error.
      - If the PID does NOT exist (stale) → the CLI MUST delete the PID file and proceed.
 3. Environment Variable Loading
-   - If `.env` exists, the CLI MUST load all valid `key=value` entries (ignoring comments and empty lines)
+   - If `<env_root>/config/.env` exists, the CLI MUST load all valid `key=value` entries (ignoring comments and empty lines)
    - and provide them only to the environment of the launched `uv` process.
    - These variables MUST NOT be persisted as global or user-shell environment variables.
 4. Launching the Backend Component
    - All managed backend processes are launched via `uv`.
    - `core`, `sse_engine`, `mitigator`, `estimator`, and `combiner` are independent managed services launched from the installed `engine` release.
    - `tranqu` is launched from the installed `tranqu` release.
-   - `gateway` is launched from the installed `gateway` release.
+   - `gateway` is managed as a Python/uv component and launched from the
+     installed `gateway` release.
+   - Placeholder processes are development/test-only. They MUST NOT be used as
+     the default v1.0.0 user-facing behavior.
+   - If the required version binding is missing from `.metadata`, or if the
+     installed release directory is missing, `start` MUST fail with a clear
+     error.
    - For `core`:
 
       ```bash
@@ -436,10 +605,38 @@ Expected behavior:
           -l <env_root>/config/gateway/logging.yaml
       ```
 
-### 8.6 stop
+5. Process Output
+   - The CLI MUST redirect stdout and stderr for each launched process to
+     `/dev/null`.
+   - The CLI MUST NOT create log files itself.
+   - Application log files are created by the backend applications according to
+     their `logging.yaml` configuration.
+
+6. `all` Target
+   - `oqtopus backend start all` starts all managed services.
+   - Start order MUST be:
+
+      ```text
+      gateway
+      tranqu
+      mitigator
+      estimator
+      combiner
+      sse_engine
+      core
+      ```
+
+   - The command MUST apply the same validation, stale PID handling,
+     environment loading, process launch, PID writing, and stdout/stderr
+     handling used by single-service `start`.
+   - If starting any service fails, the command MUST stop and return a non-zero
+     exit status. Services already started by the same command are left running;
+     rollback is not performed automatically.
+
+### 9.6 stop
 
 ```bash
-oqtopus backend stop <component>
+oqtopus backend stop <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
 ```
 
 Safely terminates the process.
@@ -455,7 +652,27 @@ Safely terminates the process.
   error.
 - The CLI MUST NOT send `KILL` automatically.
 
-### 8.7 status
+For `oqtopus backend stop all`:
+
+- The CLI stops all managed services.
+- Stop order MUST be the reverse of start order:
+
+   ```text
+   core
+   sse_engine
+   combiner
+   estimator
+   mitigator
+   tranqu
+   gateway
+   ```
+
+- The command MUST apply the same PID handling and termination behavior used by
+  single-service `stop`.
+- If stopping any service fails, the command MUST continue attempting to stop
+  the remaining services and exit non-zero after reporting the failure.
+
+### 9.7 status
 
 ```bash
 oqtopus backend status
@@ -476,7 +693,58 @@ gateway: Stopped
 If a PID file exists but the process is not alive, the component is treated as
 stopped.
 
-### 8.8 info
+### 9.8 device-status
+
+```bash
+oqtopus backend device-status show
+oqtopus backend device-status active
+oqtopus backend device-status inactive
+oqtopus backend device-status maintenance
+```
+
+Manages the local gateway device status file.
+
+Expected behavior:
+
+1. Environment Validation
+   - The standard backend environment validation MUST run before executing any
+     `device-status` command.
+2. Target File
+   - The command operates on:
+
+      ```text
+      <env_root>/config/gateway/device_status
+      ```
+
+   - If the file does not exist, the CLI MUST fail with a clear error.
+3. `show`
+   - Prints the current file contents.
+4. Status Updates
+   - `active` writes:
+
+      ```text
+      active
+      ```
+
+   - `inactive` writes:
+
+      ```text
+      inactive
+      ```
+
+   - `maintenance` writes:
+
+      ```text
+      maintenance
+      ```
+
+5. Constraints
+   - Valid status values are only `active`, `inactive`, and `maintenance`.
+   - The command directly updates the local configuration file and does not
+     require `gateway` to be running.
+   - The command does not call scripts from the installed `gateway` release.
+
+### 9.9 info
 
 ```bash
 oqtopus backend info
@@ -509,23 +777,23 @@ tranqu: v0.1.4
 gateway: v0.2.5
 ```
 
-## 9. Environment Registry (for prune operation)
+## 10. Environment Registry (for prune operation)
 
 To ensure that the `prune` command can identify all active environments without performing a full-disk scan, the CLI maintains a central registry of environment paths.
 
-### 9.1 Registry File
+### 10.1 Registry File
 
 - Path:
   - `$XDG_CONFIG_HOME/oqtopus/backend/environments.json` if `XDG_CONFIG_HOME` is set
   - Otherwise `~/.config/oqtopus/backend/environments.json`
 - Format: A JSON file containing an array of absolute directory paths to active backend environments.
 
-### 9.2 Registration Logic
+### 10.2 Registration Logic
 
 - `oqtopus init`: Whenever a new environment is created with the `backend` template, its absolute path MUST be appended to this registry file.
 - Automatic Detection: When any `oqtopus backend` command is executed within a directory, the CLI SHOULD verify if the current path is in the registry and add it if missing.
 
-### 9.3 Prune Workflow
+### 10.3 Prune Workflow
 
 1. Load Registry: The CLI reads all paths from the `environments.json`.
 2. Scan Environments: For each registered path:
@@ -535,16 +803,16 @@ To ensure that the `prune` command can identify all active environments without 
 3. Identify Garbage: The CLI lists all versioned directories in the `install_root`.
 4. Deletion: Any directory in `install_root` that is NOT referenced by any active environment in the registry is safely deleted.
 
-## 10. Template Retrieval
+## 11. Template Retrieval
 
 Templates are managed directly within the `oqtopus-cli` repository.
 
-### 10.1 Repository Structure
+### 11.1 Repository Structure
 
 Templates are stored in the `templates/` directory of the official repository:
 `https://github.com/oqtopus-team/oqtopus-cli/tree/main/templates/`
 
-### 10.2 Retrieval Logic
+### 11.2 Retrieval Logic
 
 1. Default Source: `oqtopus init` downloads templates from the `main` branch.
    - URL Pattern: `https://raw.githubusercontent.com/oqtopus-team/oqtopus-cli/main/templates/<template_type>/`
@@ -557,16 +825,18 @@ Templates are stored in the `templates/` directory of the official repository:
 5. `.metadata` is not downloaded as a literal template file. It is generated
    dynamically by `oqtopus init`.
 
-## 11. Implementation Requirements
+## 12. Implementation Requirements
 
-### 11.1 v1.0.0 shell implementation
+### 12.1 v1.0.0 shell implementation
 
 - CLI provided as `bin/oqtopus`.
 - Portable across Linux/macOS.
 - May rely on common POSIX utilities plus `bash`, `curl`, `tar`, `jq`, and `uv`.
+- `docker` is required when running `oqtopus backend install engine`, because
+  the `sse_runtime` image is built during engine installation.
 - No Windows support for v1.0.0.
 
-### 11.2 Future Rust implementation
+### 12.2 Future Rust implementation
 
 - CLI implemented using **clap**.
 - Network operations via **reqwest**.
@@ -578,6 +848,6 @@ Templates are stored in the `templates/` directory of the official repository:
 The `scripts/install.sh` behavior is specified separately in
 `install-sh.md`.
 
-## 12. Future Extensions
+## 13. Future Extensions
 
 - oqtopus-cloud CLI

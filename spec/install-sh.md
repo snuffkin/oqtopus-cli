@@ -109,7 +109,8 @@ archive contents.
 4. Copy `bin/oqtopus` from the extracted archive into the target binary
    directory.
 5. Mark the installed file as executable.
-6. Print the installed version and target path.
+6. Attempt to install shell completion files in standard user-local locations.
+7. Print the installed version, target path, and completion setup result.
 
 ## 8. Path Behavior
 
@@ -118,7 +119,42 @@ archive contents.
 - If the target directory is not on `PATH`, `install.sh` SHOULD print a
   guidance message.
 
-## 9. Required Tools
+## 9. Shell Completion Installation
+
+`install.sh` SHOULD install shell completion files when possible.
+
+Completion files are generated from the installed command:
+
+```bash
+oqtopus completion bash
+oqtopus completion zsh
+oqtopus completion fish
+```
+
+Default user-local completion destinations:
+
+```text
+bash:
+  ~/.local/share/bash-completion/completions/oqtopus
+
+zsh:
+  ~/.local/share/zsh/site-functions/_oqtopus
+
+fish:
+  ~/.config/fish/completions/oqtopus.fish
+```
+
+The installer MAY create these directories if they do not exist. Failure to
+install completion files MUST NOT fail the entire installation if the `oqtopus`
+binary itself was installed successfully.
+
+`install.sh` MUST NOT modify shell startup files such as `.bashrc`, `.zshrc`,
+`.profile`, or `config.fish` automatically.
+
+After installation, `install.sh` MUST print what completion files were installed
+and any manual activation guidance needed for the user's shell.
+
+## 10. Required Tools
 
 `install.sh` MAY rely on common shell tools available on Linux and macOS.
 
@@ -129,8 +165,9 @@ At minimum, the installer expects:
 - `tar`
 - `mktemp`
 - `chmod`
+- `mkdir`
 
-## 10. Error Behavior
+## 11. Error Behavior
 
 `install.sh` MUST exit with an error if:
 
@@ -142,12 +179,15 @@ At minimum, the installer expects:
 - `bin/oqtopus` is not found in the extracted archive
 - the target directory is not writable
 
-## 11. Non-Goals
+Completion installation failures should be reported as warnings rather than
+fatal errors.
+
+## 12. Non-Goals
 
 `install.sh` does not:
 
 - run `oqtopus init`
 - install backend components
-- modify user configuration files
+- modify backend environment configuration files
 - modify shell startup files automatically
 - require root privileges

@@ -1,0 +1,81 @@
+# Command Reference
+
+This page summarizes the user-facing OQTOPUS CLI commands.
+
+## Top-Level Commands
+
+```bash
+oqtopus help
+oqtopus --help
+oqtopus version
+oqtopus --version
+oqtopus completion <bash|zsh|fish>
+oqtopus init <env_name> --template backend
+oqtopus backend <command>
+```
+
+## Environment Creation
+
+```bash
+oqtopus init <env_name> --template backend
+```
+
+Creates a local backend environment.
+
+## Backend Information
+
+```bash
+oqtopus backend info
+```
+
+Prints backend environment information, metadata bindings, installed releases,
+Python information, and expanded paths.
+
+## Component Management
+
+```bash
+oqtopus backend install <engine|tranqu|gateway> [version]
+oqtopus backend install all
+oqtopus backend update <engine|tranqu|gateway>
+oqtopus backend uninstall <engine|tranqu|gateway> <version>
+oqtopus backend prune
+oqtopus backend prune --yes
+```
+
+`install all` installs the latest stable `engine`, `tranqu`, and `gateway`
+releases independently.
+
+## Service Lifecycle
+
+```bash
+oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+oqtopus backend stop <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+oqtopus backend status
+```
+
+`start` and `stop` require an explicit target. Use `all` to operate on all
+managed services.
+
+## Device Status
+
+```bash
+oqtopus backend device-status show
+oqtopus backend device-status active
+oqtopus backend device-status inactive
+oqtopus backend device-status maintenance
+```
+
+Valid device status values are `active`, `inactive`, and `maintenance`.
+
+## Help
+
+Help is available at the top level and for subcommands:
+
+```bash
+oqtopus help
+oqtopus init help
+oqtopus backend help
+oqtopus backend install help
+```
+
+The same pattern applies to backend subcommands.

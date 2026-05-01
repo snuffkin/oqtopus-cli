@@ -8,9 +8,25 @@
 
 ## Overview
 
-**OQTOPUS CLI** is a command line interface (CLI) tool for OQTOPUS ecosystem.
+**OQTOPUS CLI** is a command line interface for preparing and operating a local
+OQTOPUS backend environment.
 
-It provides a installer of the backend components of OQTOPUS.
+It gives OQTOPUS users a familiar command-line workflow for creating backend
+environments, installing backend components, and starting or stopping local
+services from one `oqtopus` command. Instead of manually arranging release
+archives, configuration files, process IDs, and runtime directories, users can
+manage the local backend with package-manager-like commands such as:
+
+```bash
+oqtopus init demo --template backend
+oqtopus backend install engine
+oqtopus backend start core
+oqtopus backend status
+oqtopus backend stop core
+```
+
+For v1.0.0, OQTOPUS CLI focuses on Linux and macOS local backend workflows.
+Windows support and a future Rust implementation are planned separately.
 
 ## Documentation
 
