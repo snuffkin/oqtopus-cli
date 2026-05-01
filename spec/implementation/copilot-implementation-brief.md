@@ -392,6 +392,7 @@ Command:
 
 ```bash
 oqtopus backend start <component|all>
+oqtopus backend start <component> --foreground
 ```
 
 Required behavior:
@@ -400,10 +401,13 @@ Required behavior:
 2. If the PID is alive, exit with an error.
 3. If the PID file is stale, delete it.
 4. Load valid `key=value` lines from `config/.env`.
-5. Start the component in the background.
+5. Start the component in the background by default.
 6. Write the process PID to `pids/<component>.pid`.
-7. Redirect stdout/stderr to `/dev/null`. The CLI must not create log files
-   itself; application log files are created according to `logging.yaml`.
+7. Redirect stdout/stderr to `/dev/null` by default. With `--foreground`, keep
+   stdout/stderr attached to the terminal, wait for the service process to
+   exit, and support only one service target at a time. The CLI must not create
+   log files itself; application log files are created according to
+   `logging.yaml`.
 
 For v1.0.0, placeholder processes are development/test-only and MUST NOT be the
 default user-facing behavior. If the required component version binding is

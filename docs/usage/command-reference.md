@@ -56,6 +56,7 @@ whether another backend environment still references it.
 
 ```bash
 oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway> --foreground
 oqtopus backend stop <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
 oqtopus backend restart <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
 oqtopus backend status
@@ -63,6 +64,9 @@ oqtopus backend status
 
 `start`, `stop`, and `restart` require an explicit target. Use `all` to operate
 on all managed services.
+
+`--foreground` is available only for `start` with a single service target. It
+keeps runtime stdout and stderr attached to the terminal for debugging.
 
 ## Device Status
 

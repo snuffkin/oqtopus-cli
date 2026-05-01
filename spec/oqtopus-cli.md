@@ -589,6 +589,7 @@ Starts backend processes.
 
 ```bash
 oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway> --foreground
 ```
 
 Expected behavior:
@@ -682,8 +683,12 @@ Expected behavior:
       ```
 
 6. Process Output
-   - The CLI MUST redirect stdout and stderr for each launched process to
-     `/dev/null`.
+   - By default, the CLI MUST redirect stdout and stderr for each launched
+     process to `/dev/null`.
+   - When `--foreground` is used with a single service target, the CLI MUST
+     keep stdout and stderr attached to the terminal and wait for the service
+     process to exit.
+   - `--foreground` MUST NOT be accepted with the `all` target.
    - The CLI MUST NOT create log files itself.
    - Application log files are created by the backend applications according to
      their `logging.yaml` configuration.

@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-CLI_VERSION="${OQTOPUS_CLI_VERSION:-:wq}"
+CLI_VERSION="${OQTOPUS_CLI_VERSION:-}"
 CLI_REPO_OWNER="oqtopus-team"
 CLI_REPO_NAME="oqtopus-cli"
 TEMPLATE_BRANCH="main"
@@ -127,6 +127,7 @@ usage_backend_start() {
   cat <<'EOF'
 Usage:
   oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway|all>
+  oqtopus backend start <core|sse_engine|mitigator|estimator|combiner|tranqu|gateway> --foreground
 EOF
 }
 
@@ -338,6 +339,14 @@ resolve_latest_version() {
   latest=$(jq -r '[.[].name as $tag | $tag | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | capture("^v(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)$") | {tag: $tag, major: (.major | tonumber), minor: (.minor | tonumber), patch: (.patch | tonumber)}] | sort_by([.major, .minor, .patch]) | last | .tag // empty' <<< "$tags_json")
   [[ -n "$latest" ]] || die "could not resolve a latest stable version from GitHub tags for $repo."
   printf '%s\n' "$latest"
+}
+
+cli_version() {
+  if [[ -n "$CLI_VERSION" ]]; then
+    printf '%s\n' "$CLI_VERSION"
+    return
+  fi
+  resolve_latest_version "${CLI_REPO_OWNER}/${CLI_REPO_NAME}"
 }
 
 list_component_versions() {
@@ -749,8 +758,9 @@ service_command() {
 
 start_service() {
   local service=$1
+  local foreground=${2:-0}
   local pid_file="$ENV_ROOT/pids/${service}.pid"
-  local pid cmd
+  local pid cmd status recorded_pid
   is_in_list "$service" "${SERVICES[@]}" || die "unknown service: $service"
   acquire_service_start_lock "$service"
   if [[ -f "$pid_file" ]]; then
@@ -762,6 +772,27 @@ start_service() {
   fi
   need_command uv
   cmd=$(service_command "$service")
+  if [[ "$foreground" -eq 1 ]]; then
+    (
+      cd "$ENV_ROOT"
+      load_env_exports
+      ( set +e; eval "$cmd"; exit "$?" ) &
+      pid=$!
+      printf '%s\n' "$pid" > "$pid_file"
+      release_service_start_lock
+      log "Started $service in foreground (PID $pid)"
+      set +e
+      wait "$pid"
+      status=$?
+      set -e
+      recorded_pid=$(cat "$pid_file" 2>/dev/null || true)
+      if [[ "$recorded_pid" == "$pid" ]]; then
+        rm -f "$pid_file"
+      fi
+      exit "$status"
+    )
+    return
+  fi
   (
     trap '' HUP
     cd "$ENV_ROOT"
@@ -786,14 +817,19 @@ cmd_backend_start() {
   fi
   validate_backend_env
   local target=${1:-}
-  [[ -n "$target" && $# -eq 1 ]] || { usage_backend_start; exit 1; }
+  local foreground=0
+  if [[ "${2:-}" == "--foreground" ]]; then
+    foreground=1
+  fi
+  [[ -n "$target" && ( $# -eq 1 || ( $# -eq 2 && "$foreground" -eq 1 ) ) ]] || { usage_backend_start; exit 1; }
   if [[ "$target" == "all" ]]; then
+    [[ "$foreground" -eq 0 ]] || die "oqtopus backend start all does not support --foreground. Start one service at a time in foreground mode."
     local service
     for service in "${START_ALL_ORDER[@]}"; do
       start_service "$service"
     done
   else
-    start_service "$target"
+    start_service "$target" "$foreground"
   fi
 }
 
@@ -1011,7 +1047,11 @@ _oqtopus()
           COMPREPLY=( $(compgen -W "engine tranqu gateway help --help" -- "$cur") )
           return 0
           ;;
-        start|stop|restart)
+        start)
+          COMPREPLY=( $(compgen -W "core sse_engine mitigator estimator combiner tranqu gateway all --foreground help --help" -- "$cur") )
+          return 0
+          ;;
+        stop|restart)
           COMPREPLY=( $(compgen -W "core sse_engine mitigator estimator combiner tranqu gateway all help --help" -- "$cur") )
           return 0
           ;;
@@ -1048,11 +1088,12 @@ completion_zsh() {
 #compdef oqtopus
 
 _oqtopus() {
-  local -a commands backend_commands install_components update_components services device_status shells templates
+  local -a commands backend_commands install_components update_components start_services services device_status shells templates
   commands=(init backend completion version help --help --version)
   backend_commands=(install versions uninstall update start stop restart status device-status info help --help)
   install_components=(engine tranqu gateway all help --help)
   update_components=(engine tranqu gateway help --help)
+  start_services=(core sse_engine mitigator estimator combiner tranqu gateway all --foreground help --help)
   services=(core sse_engine mitigator estimator combiner tranqu gateway all help --help)
   device_status=(show active inactive maintenance help --help)
   shells=(bash zsh fish)
@@ -1063,7 +1104,8 @@ _oqtopus() {
       case $words[3] in
         install) compadd -- $install_components ;;
         versions|update|uninstall) compadd -- $update_components ;;
-        start|stop|restart) compadd -- $services ;;
+        start) compadd -- $start_services ;;
+        stop|restart) compadd -- $services ;;
         device-status) compadd -- $device_status ;;
         *) compadd -- $backend_commands ;;
       esac
@@ -1086,7 +1128,8 @@ complete -c oqtopus -f -n "__fish_seen_subcommand_from init" -a "--template back
 complete -c oqtopus -f -n "__fish_seen_subcommand_from backend" -a "install versions uninstall update start stop restart status device-status info help --help"
 complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from install" -a "engine tranqu gateway all help --help"
 complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from versions update uninstall" -a "engine tranqu gateway help --help"
-complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from start stop restart" -a "core sse_engine mitigator estimator combiner tranqu gateway all help --help"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from start" -a "core sse_engine mitigator estimator combiner tranqu gateway all --foreground help --help"
+complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from stop restart" -a "core sse_engine mitigator estimator combiner tranqu gateway all help --help"
 complete -c oqtopus -f -n "__fish_seen_subcommand_from backend; and __fish_seen_subcommand_from device-status" -a "show active inactive maintenance help --help"
 EOF
 }
@@ -1115,7 +1158,9 @@ main() {
       usage_top
       ;;
     version|--version)
-      printf 'oqtopus %s\n' "$CLI_VERSION"
+      local version
+      version=$(cli_version)
+      printf 'oqtopus %s\n' "$version"
       ;;
     init)
       shift

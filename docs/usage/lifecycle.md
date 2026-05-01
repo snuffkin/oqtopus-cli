@@ -64,6 +64,17 @@ the same time, one of them fails before launching another process.
 Started services are detached from the short-lived CLI process and continue
 running after `oqtopus backend start` exits.
 
+For debugging, start a single service in foreground mode:
+
+```bash
+oqtopus backend start gateway --foreground
+```
+
+Foreground mode keeps the service attached to the terminal, so runtime stdout
+and stderr are visible. The command exits when the service process exits.
+`--foreground` is supported only for one service at a time; it cannot be used
+with `all`.
+
 ## Check Process Status
 
 ```bash
@@ -137,7 +148,10 @@ it starts all services again using the normal start order.
 
 ## Process Output And Logs
 
-Runtime stdout and stderr are redirected to `/dev/null`.
+By default, runtime stdout and stderr are redirected to `/dev/null`.
+
+Use `oqtopus backend start <service> --foreground` when you need to inspect
+runtime stdout and stderr directly while debugging one service.
 
 OQTOPUS CLI does not create application log files. Backend applications write
 their own log files according to the `logging.yaml` files under `config/`.

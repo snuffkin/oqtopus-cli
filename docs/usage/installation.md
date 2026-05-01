@@ -60,3 +60,6 @@ and:
 ```bash
 oqtopus backend install all
 ```
+
+The Docker image build can take several minutes, especially the first time it
+runs or after Docker cache cleanup.

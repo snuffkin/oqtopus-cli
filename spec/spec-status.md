@@ -275,7 +275,11 @@ The backend components currently in scope are:
 - If the process is still running after 5 seconds, `stop` fails.
 - `stop` does not send `KILL` automatically.
 - PID ownership or command matching is not required in the current design.
-- Runtime stdout/stderr is redirected to `/dev/null`.
+- Runtime stdout/stderr is redirected to `/dev/null` by default.
+- `oqtopus backend start <service> --foreground` keeps stdout/stderr attached
+  to the terminal for a single service and waits for the service process to
+  exit.
+- `--foreground` is not supported with `start all`.
 - The CLI does not create log files itself; application log files are created
   by backend applications according to their `logging.yaml` configuration.
 - Placeholder processes are development/test-only and are not the default

@@ -100,7 +100,8 @@ The same form applies to `tranqu` and `gateway`.
 ## Engine And `sse_runtime`
 
 Installing `engine` also builds the `sse_runtime` Docker image from the
-installed engine release.
+installed engine release. This Docker build can take several minutes,
+especially the first time it runs or after Docker cache cleanup.
 
 Because `engine` is a monorepo, installing it also prepares the uv environments
 for the engine service subprojects:
