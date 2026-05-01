@@ -600,11 +600,19 @@ Expected behavior:
    - If `<env_root>/pids/<component>.pid` exists:
      - If the PID is still alive → the CLI MUST exit with an error.
      - If the PID does NOT exist (stale) → the CLI MUST delete the PID file and proceed.
-3. Environment Variable Loading
+3. Start Lock Handling
+   - Before launching a service, the CLI MUST acquire a service-specific start
+     lock under `<env_root>/pids/`.
+   - If another alive `oqtopus backend start` process already holds the lock
+     for the same service, the CLI MUST exit with an error and MUST NOT launch
+     a duplicate process.
+   - If the lock is stale, the CLI MAY remove it and proceed.
+   - The lock MUST be released when the start command exits.
+4. Environment Variable Loading
    - If `<env_root>/config/.env` exists, the CLI MUST load all valid `key=value` entries (ignoring comments and empty lines)
    - and provide them only to the environment of the launched `uv` process.
    - These variables MUST NOT be persisted as global or user-shell environment variables.
-4. Launching the Backend Component
+5. Launching the Backend Component
    - All managed backend processes are launched via `uv`.
    - `core`, `sse_engine`, `mitigator`, `estimator`, and `combiner` are independent managed services launched from the installed `engine` release.
    - `tranqu` is launched from the installed `tranqu` release.
@@ -673,14 +681,16 @@ Expected behavior:
           -l <env_root>/config/gateway/logging.yaml
       ```
 
-5. Process Output
+6. Process Output
    - The CLI MUST redirect stdout and stderr for each launched process to
      `/dev/null`.
    - The CLI MUST NOT create log files itself.
    - Application log files are created by the backend applications according to
      their `logging.yaml` configuration.
+   - The launched process SHOULD ignore `SIGHUP` from the short-lived CLI
+     process so it remains running after `oqtopus backend start` exits.
 
-6. `all` Target
+7. `all` Target
    - `oqtopus backend start all` starts all managed services.
    - Start order MUST be:
 

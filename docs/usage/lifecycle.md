@@ -57,6 +57,13 @@ oqtopus backend start gateway
 If the service is already running, `start` fails instead of starting a duplicate
 process.
 
+OQTOPUS CLI also takes a short-lived start lock for each service while the
+process is being launched. If two `start` commands for the same service run at
+the same time, one of them fails before launching another process.
+
+Started services are detached from the short-lived CLI process and continue
+running after `oqtopus backend start` exits.
+
 ## Check Process Status
 
 ```bash

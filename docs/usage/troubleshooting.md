@@ -76,6 +76,9 @@ oqtopus backend start all
 If a PID file exists and the recorded process is alive, `start` fails to avoid
 starting a duplicate service.
 
+If another `start` command is already launching the same service, `start` also
+fails before creating a duplicate process.
+
 Check status:
 
 ```bash
